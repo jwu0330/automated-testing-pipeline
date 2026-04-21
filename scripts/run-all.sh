@@ -8,7 +8,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "╔═══════════════════════════════════════════╗"
-echo "║   自動化測試流水線 — babydodofun           ║"
+echo "║   01 Init - Set Project Vars              ║"
+echo "║   自動化測試流水線（精簡四步）             ║"
 echo "║   $(date)                                  ║"
 echo "╚═══════════════════════════════════════════╝"
 echo ""
@@ -23,33 +24,34 @@ fi
 # 建立報告目錄
 mkdir -p reports
 
-# ─── 第 1 步：SSL/TLS 檢測 ───
+# ─── 與 run-project.sh all 對齊的命名（此腳本為子集）───
+# ─── [1/4] 06 Security - SSL Scan ───
 echo ""
-echo "▶ [1/4] SSL/TLS 檢測 (testssl.sh)"
+echo "▶ [1/4] 06 Security - SSL Scan (testssl.sh)"
 echo "────────────────────────────────────"
 docker compose --profile ssl up --build --abort-on-container-exit
-echo "✅ SSL 檢測完成"
+echo "✅ 06 Security - SSL Scan 完成"
 
-# ─── 第 2 步：資安掃描 ───
+# ─── [2/4] 09 Web - E2E Tests ───
 echo ""
-echo "▶ [2/4] 資安掃描 (OWASP ZAP)"
-echo "────────────────────────────────────"
-docker compose --profile security up --abort-on-container-exit
-echo "✅ 資安掃描完成"
-
-# ─── 第 3 步：壓力測試 ───
-echo ""
-echo "▶ [3/4] 壓力測試 (k6)"
-echo "────────────────────────────────────"
-docker compose --profile stress up --abort-on-container-exit
-echo "✅ 壓力測試完成"
-
-# ─── 第 4 步：E2E 測試 ───
-echo ""
-echo "▶ [4/4] E2E 測試 (Playwright)"
+echo "▶ [2/4] 09 Web - E2E Tests (Playwright)"
 echo "────────────────────────────────────"
 docker compose --profile e2e up --abort-on-container-exit
-echo "✅ E2E 測試完成"
+echo "✅ 09 Web - E2E Tests 完成"
+
+# ─── [3/4] 11 Security - ZAP ───
+echo ""
+echo "▶ [3/4] 11 Security - ZAP (OWASP ZAP)"
+echo "────────────────────────────────────"
+docker compose --profile security up --abort-on-container-exit
+echo "✅ 11 Security - ZAP 完成"
+
+# ─── [4/4] 12 Performance - Load Test ───
+echo ""
+echo "▶ [4/4] 12 Performance - Load Test (k6)"
+echo "────────────────────────────────────"
+docker compose --profile stress up --abort-on-container-exit
+echo "✅ 12 Performance - Load Test 完成"
 
 # ─── 總結 ───
 echo ""

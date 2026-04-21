@@ -9,6 +9,11 @@
 #   all (預設) | ssl | security | stress | static | unit | e2e
 #   nuclei | lighthouse | monkey | trivy | links | summary
 #
+# all 的執行序（直線；日後改平行仍沿用此編號／命名）：
+#   02 Precheck → 03 Static → 04 Unit → 05 Lychee → 06 SSL → 07 Trivy
+#   → 08 Lighthouse → 09 E2E → 10 Nuclei → 11 ZAP → 12 Load → 13 Monkey
+#   → 14–16 Report（summarize.js）
+#
 # 設計原則：
 #   - testing.yml 只需 4 個必填欄位（name / target_url / local_path / php_version）
 #   - 其他測試開關走自動偵測，testing.yml 只寫「要覆寫」的部分
@@ -89,6 +94,7 @@ mkdir -p "$REPORTS_RAW"
 export REPORTS_RAW_DIR="$REPORTS_RAW"
 
 echo "╔══════════════════════════════════════════════════╗"
+echo "║  01 Init - Set Project Vars"
 echo "║  專案測試：$NAME"
 echo "║  目標：    $TARGET_URL"
 if $LOCAL_MODE; then
@@ -154,11 +160,11 @@ prune_testssl() {
     ls -1t "$REPORTS_RAW"/testssl-*.json 2>/dev/null | tail -n +$((keep+1)) | xargs -r rm -f
 }
 
-# ─── 測試 1：SSL/TLS ───
+# ─── 06 Security - SSL Scan ───
 run_ssl() {
-    enabled ssl || { echo "⏭  SSL：略過"; return 0; }
+    enabled ssl || { echo "⏭  06 Security - SSL Scan：略過"; return 0; }
     echo ""
-    echo "▶ SSL/TLS 檢測 (testssl.sh)"
+    echo "▶ 06 Security - SSL Scan (testssl.sh)"
     echo "──────────────────────────────────────────"
     docker compose --profile ssl up --build --abort-on-container-exit || echo "  (testssl 結束碼 $?)"
     move_report 'testssl-*.html'
@@ -166,22 +172,22 @@ run_ssl() {
     prune_testssl
 }
 
-# ─── 測試 2：OWASP ZAP ───
+# ─── 11 Security - ZAP ───
 run_security() {
-    enabled security || { echo "⏭  Security：略過"; return 0; }
+    enabled security || { echo "⏭  11 Security - ZAP：略過"; return 0; }
     echo ""
-    echo "▶ 資安掃描 (OWASP ZAP)"
+    echo "▶ 11 Security - ZAP (OWASP ZAP)"
     echo "──────────────────────────────────────────"
     docker compose --profile security up --abort-on-container-exit || echo "  (zap 結束碼 $?；2=發現警告)"
     move_report 'zap-report.html'
     move_report 'zap-report.json'
 }
 
-# ─── 測試 3：k6 壓力 ───
+# ─── 12 Performance - Load Test ───
 run_stress() {
-    enabled stress || { echo "⏭  Stress：略過"; return 0; }
+    enabled stress || { echo "⏭  12 Performance - Load Test：略過"; return 0; }
     echo ""
-    echo "▶ 壓力測試 (k6)"
+    echo "▶ 12 Performance - Load Test (k6)"
     echo "──────────────────────────────────────────"
     K6_VUS=$(yq -r '.tests.stress.vus // 10' "$TESTING_YML")
     K6_DURATION=$(yq -r '.tests.stress.duration // "30s"' "$TESTING_YML")
@@ -190,11 +196,11 @@ run_stress() {
     move_report 'k6-*.json'
 }
 
-# ─── 測試 4：PHPStan ───
+# ─── 03 Code - Static Analysis ───
 run_static() {
-    enabled static || { echo "⏭  Static：略過"; return 0; }
+    enabled static || { echo "⏭  03 Code - Static Analysis：略過"; return 0; }
     echo ""
-    echo "▶ 靜態分析 (PHPStan)"
+    echo "▶ 03 Code - Static Analysis (PHPStan)"
     echo "──────────────────────────────────────────"
     local level config
     level=$(yq -r '.tests.static.level // 5' "$TESTING_YML")
@@ -257,11 +263,11 @@ stop_test_db() {
     docker compose --profile unit-db down -v >/dev/null 2>&1 || true
 }
 
-# ─── 測試 5：PHPUnit（可選 DB）────
+# ─── 04 Code - Unit Tests ───
 run_unit() {
-    enabled unit || { echo "⏭  Unit：略過（無 .testing/unit/phpunit.xml）"; return 0; }
+    enabled unit || { echo "⏭  04 Code - Unit Tests：略過（無 .testing/unit/phpunit.xml）"; return 0; }
     echo ""
-    echo "▶ 單元測試 (PHPUnit + pcov)"
+    echo "▶ 04 Code - Unit Tests (PHPUnit + pcov)"
     echo "──────────────────────────────────────────"
     local image="testing-pipeline-phpunit:php${PHP_VERSION}"
     if ! docker image inspect "$image" >/dev/null 2>&1; then
@@ -310,11 +316,11 @@ run_unit() {
     echo "  報告：$REPORTS_RAW/phpunit.xml、$REPORTS_RAW/coverage/index.html"
 }
 
-# ─── 測試 6：Playwright E2E ───
+# ─── 09 Web - E2E Tests ───
 run_e2e() {
-    enabled e2e || { echo "⏭  E2E：略過（無 .testing/e2e/package.json）"; return 0; }
+    enabled e2e || { echo "⏭  09 Web - E2E Tests：略過（無 .testing/e2e/package.json）"; return 0; }
     echo ""
-    echo "▶ E2E 測試 (Playwright)"
+    echo "▶ 09 Web - E2E Tests (Playwright)"
     echo "──────────────────────────────────────────"
     local env_args=()
     [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
@@ -336,11 +342,11 @@ run_e2e() {
     echo "  報告：$REPORTS_RAW/playwright/index.html"
 }
 
-# ─── 測試 7：Nuclei（深層資安）────
+# ─── 10 Security - Nuclei ───
 run_nuclei() {
-    enabled nuclei || { echo "⏭  Nuclei：略過"; return 0; }
+    enabled nuclei || { echo "⏭  10 Security - Nuclei：略過"; return 0; }
     echo ""
-    echo "▶ 深層資安掃描 (Nuclei)"
+    echo "▶ 10 Security - Nuclei (Nuclei)"
     echo "──────────────────────────────────────────"
     NUCLEI_SEVERITY=$(yq -r '.tests.nuclei.severity // "critical,high,medium"' "$TESTING_YML")
     NUCLEI_RATE_LIMIT=$(yq -r '.tests.nuclei.rate_limit // 50' "$TESTING_YML")
@@ -351,11 +357,11 @@ run_nuclei() {
     echo "  報告：$REPORTS_RAW/nuclei.jsonl"
 }
 
-# ─── 測試 8：Lighthouse（前端品質）────
+# ─── 08 Web - Lighthouse ───
 run_lighthouse() {
-    enabled lighthouse || { echo "⏭  Lighthouse：略過"; return 0; }
+    enabled lighthouse || { echo "⏭  08 Web - Lighthouse：略過"; return 0; }
     echo ""
-    echo "▶ 前端品質檢測 (Lighthouse)"
+    echo "▶ 08 Web - Lighthouse (Lighthouse)"
     echo "──────────────────────────────────────────"
     local pages
     pages=$(yq -r '(.tests.lighthouse.pages // ["/"]) | join(" ")' "$TESTING_YML")
@@ -371,11 +377,11 @@ run_lighthouse() {
     echo "  報告：$REPORTS_RAW/lighthouse-manifest.json"
 }
 
-# ─── 測試 9：Monkey（Gremlins.js via Playwright）────
+# ─── 13 Chaos - Monkey ───
 run_monkey() {
-    enabled monkey || { echo "⏭  Monkey：略過"; return 0; }
+    enabled monkey || { echo "⏭  13 Chaos - Monkey：略過"; return 0; }
     echo ""
-    echo "▶ 互動探測 (Monkey — Gremlins.js)"
+    echo "▶ 13 Chaos - Monkey (Gremlins.js / Playwright)"
     echo "──────────────────────────────────────────"
     local pages attacks delay
     pages=$(yq -r '(.tests.monkey.pages // ["/"]) | join(",")' "$TESTING_YML")
@@ -413,11 +419,11 @@ run_monkey() {
     echo "  報告：$REPORTS_RAW/monkey-report.json、$REPORTS_RAW/monkey-html/index.html"
 }
 
-# ─── 測試 10：Trivy（供應鏈）────
+# ─── 07 Security - Trivy ───
 run_trivy() {
-    enabled trivy || { echo "⏭  Trivy：略過（需 local_path）"; return 0; }
+    enabled trivy || { echo "⏭  07 Security - Trivy：略過（需 local_path）"; return 0; }
     echo ""
-    echo "▶ 供應鏈掃描 (Trivy fs)"
+    echo "▶ 07 Security - Trivy (Trivy fs)"
     echo "──────────────────────────────────────────"
     local severity scanners
     severity=$(yq -r '.tests.trivy.severity // "CRITICAL,HIGH,MEDIUM"' "$TESTING_YML")
@@ -440,11 +446,11 @@ run_trivy() {
     echo "  報告：$REPORTS_RAW/trivy-fs.json"
 }
 
-# ─── 測試 11：Lychee（壞連結）────
+# ─── 05 Web - Link Check (Lychee) ───
 run_links() {
-    enabled links || { echo "⏭  Links：略過"; return 0; }
+    enabled links || { echo "⏭  05 Web - Link Check (Lychee)：略過"; return 0; }
     echo ""
-    echo "▶ 連結檢查 (Lychee)"
+    echo "▶ 05 Web - Link Check (Lychee)"
     echo "──────────────────────────────────────────"
     LYCHEE_TIMEOUT=$(yq -r '.tests.links.timeout // 15' "$TESTING_YML")
     LYCHEE_MAX_CONCURRENCY=$(yq -r '.tests.links.max_concurrency // 4' "$TESTING_YML")
@@ -455,10 +461,26 @@ run_links() {
     echo "  報告：$REPORTS_RAW/lychee.json"
 }
 
-# ─── 產生評分卡 ────
+# ─── 02 Precheck - Health Check（日後接 Gate 1：首頁 200/302）───
+run_precheck() {
+    echo ""
+    echo "▶ 02 Precheck - Health Check"
+    echo "──────────────────────────────────────────"
+    if command -v curl >/dev/null 2>&1; then
+        local code
+        code=$(curl -sS -o /dev/null -w "%{http_code}" -L --max-time 20 "$TARGET_URL" || echo "000")
+        echo "  GET $TARGET_URL → HTTP $code"
+    else
+        echo "  （宿主未安裝 curl，略過 URL 探測）"
+    fi
+}
+
+# ─── 14–16 Report（summarize.js：彙整／解析／評分卡）───
 run_summary() {
     echo ""
-    echo "▶ 產生統一報告 (summarize.js)"
+    echo "▶ 14 Report - Collect Results"
+    echo "▶ 15 Report - Parse Results"
+    echo "▶ 16 Report - Generate Scorecard"
     echo "──────────────────────────────────────────"
     node "$ROOT/scripts/summarize.js" "$NAME"
 }
@@ -466,16 +488,17 @@ run_summary() {
 # ─── Dispatch ────
 case "$SCOPE" in
     all)
-        run_ssl
+        run_precheck
         run_static
-        run_trivy
-        run_security
-        run_nuclei
-        run_stress
-        run_lighthouse
-        run_links
         run_unit
+        run_links
+        run_ssl
+        run_trivy
+        run_lighthouse
         run_e2e
+        run_nuclei
+        run_security
+        run_stress
         run_monkey
         run_summary
         ;;
