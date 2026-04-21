@@ -20,10 +20,10 @@ mkdir -p "${REPORT_DIR}"
 
 # 執行 testssl.sh
 /opt/testssl.sh/testssl.sh \
-    --html "${REPORT_DIR}/testssl-${TIMESTAMP}.html" \
+    --htmlfile "${REPORT_DIR}/testssl-${TIMESTAMP}.html" \
     --jsonfile "${REPORT_DIR}/testssl-${TIMESTAMP}.json" \
     --severity LOW \
-    --fast \
+    --append \
     "${TARGET}"
 
 echo ""
