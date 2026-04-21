@@ -219,14 +219,15 @@ DB_NET="atp-test-net"
 start_test_db() {
     echo "  ▶ 啟動測試 DB（mysql:8.0, tmpfs）..."
     docker compose --profile unit-db up -d test-mysql
-    # 等 healthy（最多 30 秒）
-    local tries=30
-    until docker compose exec -T test-mysql mysqladmin ping -ptest --silent 2>/dev/null; do
+    # 等到 root 認證真的 ready（healthcheck 會在 socket 開啟時就 pass，但
+    # MYSQL_ROOT_PASSWORD 的 user 初始化稍晚完成，用真實 SELECT 驗證才可靠）
+    local tries=45
+    until docker compose exec -T test-mysql mysql -uroot -ptest -e "SELECT 1" >/dev/null 2>&1; do
         tries=$((tries-1))
-        [ $tries -le 0 ] && { echo "  ❌ test-mysql ping timeout"; return 1; }
+        [ $tries -le 0 ] && { echo "  ❌ test-mysql auth timeout"; return 1; }
         sleep 1
     done
-    echo "  ✓ test-mysql ready"
+    echo "  ✓ test-mysql ready（auth OK）"
     # 載入 schema（若專案有 database/init.sql）
     if [ -f "$PROJECT_PATH/database/init.sql" ]; then
         echo "  載入 schema：database/init.sql"
@@ -240,7 +241,9 @@ start_test_db() {
         docker compose exec -T test-mysql mysql -uroot -ptest test < "$f"
         loaded=$((loaded+1))
     done
-    [ $loaded -eq 0 ] && echo "  （無 fixtures 檔）"
+    if [ $loaded -eq 0 ]; then
+        echo "  （無 fixtures 檔）"
+    fi
 }
 
 stop_test_db() {
