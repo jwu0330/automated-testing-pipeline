@@ -16,14 +16,18 @@ parameters:
     paths:
         - /project
 
+    # 加上 (?) 讓路徑不存在時不報錯（各專案目錄結構不同）
     excludePaths:
         analyseAndScan:
-            - /project/vendor
-            - /project/node_modules
-            - /project/.git
-            - /project/.testing
-            - /project/tests
-            - /project/reports
+            - /project/vendor (?)
+            - /project/node_modules (?)
+            - /project/.git (?)
+            - /project/.testing (?)
+            - /project/tests (?)
+            - /project/reports (?)
+            - /project/local (?)
+            - /project/database (?)
+            - /project/.claude (?)
 
     # 遠振共享主機常見：PHP 7.4+ / 8.x 混用
     phpVersion: 80100

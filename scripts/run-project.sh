@@ -102,22 +102,24 @@ run_ssl() {
     echo ""
     echo "▶ SSL/TLS 檢測 (testssl.sh)"
     echo "──────────────────────────────────────────"
-    docker compose --profile ssl up --build --abort-on-container-exit
+    docker compose --profile ssl up --build --abort-on-container-exit || echo "  (testssl 結束碼 $?)"
     move_report 'testssl-*.html'
     move_report 'testssl-*.json'
 }
 
 # ─── 測試 2：OWASP ZAP ───
+# ZAP 會用不同 exit code 表達：0=乾淨、1=錯誤、2=發現警告
 run_security() {
     enabled security || { echo "⏭  Security：已停用"; return 0; }
     echo ""
     echo "▶ 資安掃描 (OWASP ZAP)"
     echo "──────────────────────────────────────────"
-    docker compose --profile security up --abort-on-container-exit
+    docker compose --profile security up --abort-on-container-exit || echo "  (zap 結束碼 $?；2=發現警告，非錯誤)"
     move_report 'zap-report.html'
 }
 
 # ─── 測試 3：k6 壓力測試 ───
+# k6 未達效能門檻時回傳 99（非 0），仍要搬報告
 run_stress() {
     enabled stress || { echo "⏭  Stress：已停用"; return 0; }
     echo ""
@@ -125,7 +127,7 @@ run_stress() {
     echo "──────────────────────────────────────────"
     export K6_VUS=$(yq -r '.tests.stress.vus // 10' "$TESTING_YML")
     export K6_DURATION=$(yq -r '.tests.stress.duration // "30s"' "$TESTING_YML")
-    docker compose --profile stress up --abort-on-container-exit
+    docker compose --profile stress up --abort-on-container-exit || echo "  (k6 結束碼 $?；99=未達效能門檻)"
     move_report 'k6-*.json'
 }
 
