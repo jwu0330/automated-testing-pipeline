@@ -37,13 +37,13 @@ docker exec n8n n8n import:workflow --input=/tmp/pipeline.json
 [Manual Trigger]
       │
       ▼
-[Set Project Vars]    ← 指定要跑哪個專案、哪些測試
+[01 Init - Set Project Vars]   ← projectName（registry key）
       │
       ▼
-[Execute Command]     ← 呼叫 /workspace/scripts/run-project.sh
+[02 … 13 各 scope]             ← scripts/run-project.sh <name> <scope>
       │
       ▼
-[Parse Output]        ← (選)解析報告、通知
+[16 Report → 15 Parse]         ← summarize --json 與 Code 節點
 ```
 
 ## 擴充方向

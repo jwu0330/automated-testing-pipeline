@@ -1,7 +1,7 @@
 {
   "id": "oNnWI3Ohcxh0ptqX",
   "name": "Testing Pipeline — Run Project",
-  "description": null,
+  "description": "線性執行序與 scripts/run-project.sh all 對齊（日後可改平行 Merge）。",
   "active": false,
   "nodes": [
     {
@@ -27,211 +27,226 @@
         "options": {}
       },
       "id": "tp-00000000-0000-0000-0000-000000000002",
-      "name": "Set Project Vars — 設定專案",
+      "name": "01 Init - Set Project Vars",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [544, -192],
-      "notes": "設定要跑的專案名稱。雙擊修改為 babydodofun / 其他專案。"
+      "notes": "設定要跑的專案名稱（projects.registry.yml 的 key）。雙擊修改。"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} ssl"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} precheck"
       },
       "id": "tp-00000000-0000-0000-0000-000000000003",
-      "name": "Run SSL Scan — SSL 憑證檢測",
+      "name": "02 Precheck - Health Check",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [864, -192],
       "onError": "continueRegularOutput",
-      "notes": "scope = ssl"
+      "notes": "scope = precheck（URL 探測；日後接 Gate 1）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} static"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} static"
       },
       "id": "tp-00000000-0000-0000-0000-000000000004",
-      "name": "Run Static Analysis — 靜態程式碼分析",
+      "name": "03 Code - Static Analysis",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [1088, -192],
       "onError": "continueRegularOutput",
-      "notes": "scope = static"
+      "notes": "scope = static（PHPStan）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} trivy"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} unit"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000011",
-      "name": "Run Trivy — 供應鏈掃描",
+      "id": "tp-00000000-0000-0000-0000-000000000007",
+      "name": "04 Code - Unit Tests",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [1312, -192],
       "onError": "continueRegularOutput",
-      "notes": "scope = trivy（依賴 CVE / secrets / misconfig）"
+      "notes": "scope = unit（PHPUnit）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} security"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} links"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000005",
-      "name": "Run Security Scan — 弱點掃描 (ZAP)",
+      "id": "tp-00000000-0000-0000-0000-000000000014",
+      "name": "05 Web - Link Check (Lychee)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [1536, -192],
       "onError": "continueRegularOutput",
-      "notes": "scope = security（OWASP ZAP baseline）"
+      "notes": "scope = links（Lychee）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} nuclei"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} ssl"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000012",
-      "name": "Run Nuclei — 深層資安",
+      "id": "tp-00000000-0000-0000-0000-000000000018",
+      "name": "06 Security - SSL Scan",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [1760, -192],
       "onError": "continueRegularOutput",
-      "notes": "scope = nuclei（CVE / 錯誤配置模板掃描）"
+      "notes": "scope = ssl（testssl.sh）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} stress"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} trivy"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000006",
-      "name": "Run Load Test — 壓力測試",
+      "id": "tp-00000000-0000-0000-0000-000000000011",
+      "name": "07 Security - Trivy",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [224, 64],
       "onError": "continueRegularOutput",
-      "notes": "scope = stress"
+      "notes": "scope = trivy（fs：vuln / secret / misconfig）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} lighthouse"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} lighthouse"
       },
       "id": "tp-00000000-0000-0000-0000-000000000013",
-      "name": "Run Lighthouse — 前端品質",
+      "name": "08 Web - Lighthouse",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [448, 64],
       "onError": "continueRegularOutput",
-      "notes": "scope = lighthouse（Perf / A11y / BP / SEO）"
+      "notes": "scope = lighthouse"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} links"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} e2e"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000014",
-      "name": "Run Lychee — 連結檢查",
+      "id": "tp-00000000-0000-0000-0000-000000000008",
+      "name": "09 Web - E2E Tests",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [672, 64],
       "onError": "continueRegularOutput",
-      "notes": "scope = links（壞連結 / 圖片 404）"
+      "notes": "scope = e2e（Playwright）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} unit"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} nuclei"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000007",
-      "name": "Run Unit Tests — 單元測試",
+      "id": "tp-00000000-0000-0000-0000-000000000012",
+      "name": "10 Security - Nuclei",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [896, 64],
       "onError": "continueRegularOutput",
-      "notes": "scope = unit"
+      "notes": "scope = nuclei"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} e2e"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} security"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000008",
-      "name": "Run E2E Tests — 端對端測試",
+      "id": "tp-00000000-0000-0000-0000-000000000005",
+      "name": "11 Security - ZAP",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [1120, 64],
       "onError": "continueRegularOutput",
-      "notes": "scope = e2e"
+      "notes": "scope = security（OWASP ZAP）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} monkey"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} stress"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000015",
-      "name": "Run Monkey — Gremlins 互動探測",
+      "id": "tp-00000000-0000-0000-0000-000000000006",
+      "name": "12 Performance - Load Test",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [1344, 64],
       "onError": "continueRegularOutput",
-      "notes": "scope = monkey（隨機點擊 / 打字 / 滾動，抓未處理 JS 錯誤）"
+      "notes": "scope = stress（k6）"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} summary --json"
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} monkey"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000009",
-      "name": "Show Scorecard — 評分卡彙整",
+      "id": "tp-00000000-0000-0000-0000-000000000015",
+      "name": "13 Chaos - Monkey",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [1568, 64],
       "onError": "continueRegularOutput",
-      "notes": "呼叫 summarize.js 讀取 reports/<project>/ 的所有報告，輸出人類可讀的評分卡"
+      "notes": "scope = monkey（Gremlins）"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $('01 Init - Set Project Vars').first().json.projectName }} summary --json"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000009",
+      "name": "16 Report - Generate Scorecard",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1792, 64],
+      "onError": "continueRegularOutput",
+      "notes": "scope = summary（summarize.js --json → stdout；含 14/15 之彙整與解析）"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// 把 Show Scorecard 的 stdout (JSON 字串) 解析為結構化物件\n// 之後 n8n 的 Schema 檢視會把每個欄位分開顯示\ntry {\n  return JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    exitCode: $json.exitCode,\n  };\n}"
+        "jsCode": "// 把 16 Report - Generate Scorecard 的 stdout (JSON 字串) 解析為結構化物件\n// 之後 n8n 的 Schema 檢視會把每個欄位分開顯示\ntry {\n  return JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    exitCode: $json.exitCode,\n  };\n}"
       },
       "id": "tp-00000000-0000-0000-0000-000000000010",
-      "name": "Parse Scorecard — 結構化評分",
+      "name": "15 Report - Parse Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1792, 64],
-      "notes": "把 Show Scorecard 的 JSON stdout 解析為欄位，n8n Schema 可直接瀏覽。"
+      "position": [2016, 64],
+      "notes": "對應報告流程中的 Parse；輸入來自 summarize --json。"
     }
   ],
   "connections": {
     "Manual Trigger — 手動觸發": {
-      "main": [[{ "node": "Set Project Vars — 設定專案", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "01 Init - Set Project Vars", "type": "main", "index": 0 }]]
     },
-    "Set Project Vars — 設定專案": {
-      "main": [[{ "node": "Run SSL Scan — SSL 憑證檢測", "type": "main", "index": 0 }]]
+    "01 Init - Set Project Vars": {
+      "main": [[{ "node": "02 Precheck - Health Check", "type": "main", "index": 0 }]]
     },
-    "Run SSL Scan — SSL 憑證檢測": {
-      "main": [[{ "node": "Run Static Analysis — 靜態程式碼分析", "type": "main", "index": 0 }]]
+    "02 Precheck - Health Check": {
+      "main": [[{ "node": "03 Code - Static Analysis", "type": "main", "index": 0 }]]
     },
-    "Run Static Analysis — 靜態程式碼分析": {
-      "main": [[{ "node": "Run Trivy — 供應鏈掃描", "type": "main", "index": 0 }]]
+    "03 Code - Static Analysis": {
+      "main": [[{ "node": "04 Code - Unit Tests", "type": "main", "index": 0 }]]
     },
-    "Run Trivy — 供應鏈掃描": {
-      "main": [[{ "node": "Run Security Scan — 弱點掃描 (ZAP)", "type": "main", "index": 0 }]]
+    "04 Code - Unit Tests": {
+      "main": [[{ "node": "05 Web - Link Check (Lychee)", "type": "main", "index": 0 }]]
     },
-    "Run Security Scan — 弱點掃描 (ZAP)": {
-      "main": [[{ "node": "Run Nuclei — 深層資安", "type": "main", "index": 0 }]]
+    "05 Web - Link Check (Lychee)": {
+      "main": [[{ "node": "06 Security - SSL Scan", "type": "main", "index": 0 }]]
     },
-    "Run Nuclei — 深層資安": {
-      "main": [[{ "node": "Run Load Test — 壓力測試", "type": "main", "index": 0 }]]
+    "06 Security - SSL Scan": {
+      "main": [[{ "node": "07 Security - Trivy", "type": "main", "index": 0 }]]
     },
-    "Run Load Test — 壓力測試": {
-      "main": [[{ "node": "Run Lighthouse — 前端品質", "type": "main", "index": 0 }]]
+    "07 Security - Trivy": {
+      "main": [[{ "node": "08 Web - Lighthouse", "type": "main", "index": 0 }]]
     },
-    "Run Lighthouse — 前端品質": {
-      "main": [[{ "node": "Run Lychee — 連結檢查", "type": "main", "index": 0 }]]
+    "08 Web - Lighthouse": {
+      "main": [[{ "node": "09 Web - E2E Tests", "type": "main", "index": 0 }]]
     },
-    "Run Lychee — 連結檢查": {
-      "main": [[{ "node": "Run Unit Tests — 單元測試", "type": "main", "index": 0 }]]
+    "09 Web - E2E Tests": {
+      "main": [[{ "node": "10 Security - Nuclei", "type": "main", "index": 0 }]]
     },
-    "Run Unit Tests — 單元測試": {
-      "main": [[{ "node": "Run E2E Tests — 端對端測試", "type": "main", "index": 0 }]]
+    "10 Security - Nuclei": {
+      "main": [[{ "node": "11 Security - ZAP", "type": "main", "index": 0 }]]
     },
-    "Run E2E Tests — 端對端測試": {
-      "main": [[{ "node": "Run Monkey — Gremlins 互動探測", "type": "main", "index": 0 }]]
+    "11 Security - ZAP": {
+      "main": [[{ "node": "12 Performance - Load Test", "type": "main", "index": 0 }]]
     },
-    "Run Monkey — Gremlins 互動探測": {
-      "main": [[{ "node": "Show Scorecard — 評分卡彙整", "type": "main", "index": 0 }]]
+    "12 Performance - Load Test": {
+      "main": [[{ "node": "13 Chaos - Monkey", "type": "main", "index": 0 }]]
     },
-    "Show Scorecard — 評分卡彙整": {
-      "main": [[{ "node": "Parse Scorecard — 結構化評分", "type": "main", "index": 0 }]]
+    "13 Chaos - Monkey": {
+      "main": [[{ "node": "16 Report - Generate Scorecard", "type": "main", "index": 0 }]]
+    },
+    "16 Report - Generate Scorecard": {
+      "main": [[{ "node": "15 Report - Parse Results", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
@@ -240,7 +255,5 @@
   },
   "staticData": null,
   "pinData": {},
-  "tags": [
-    { "name": "pipeline" }
-  ]
+  "tags": [{ "name": "pipeline" }]
 }

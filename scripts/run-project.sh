@@ -7,7 +7,7 @@
 #
 # scope:
 #   all (預設) | ssl | security | stress | static | unit | e2e
-#   nuclei | lighthouse | monkey | trivy | links | summary
+#   nuclei | lighthouse | monkey | trivy | links | precheck | summary
 #
 # all 的執行序（直線；日後改平行仍沿用此編號／命名）：
 #   02 Precheck → 03 Static → 04 Unit → 05 Lychee → 06 SSL → 07 Trivy
@@ -26,7 +26,7 @@ NAME="${1:-}"
 SCOPE="${2:-all}"
 
 if [ -z "$NAME" ]; then
-    echo "用法：bash scripts/run-project.sh <name> [all|ssl|security|stress|static|unit|e2e|nuclei|lighthouse|monkey|trivy|links|summary]"
+    echo "用法：bash scripts/run-project.sh <name> [all|precheck|ssl|security|stress|static|unit|e2e|nuclei|lighthouse|monkey|trivy|links|summary]"
     exit 1
 fi
 
@@ -502,6 +502,7 @@ case "$SCOPE" in
         run_monkey
         run_summary
         ;;
+    precheck)   run_precheck ;;
     ssl)        run_ssl ;;
     security)   run_security ;;
     stress)     run_stress ;;
@@ -516,7 +517,7 @@ case "$SCOPE" in
     summary)    run_summary ;;
     *)
         echo "❌ 未知 scope：$SCOPE"
-        echo "   可用：all | ssl | security | stress | static | unit | e2e | nuclei | lighthouse | monkey | trivy | links | summary"
+        echo "   可用：all | precheck | ssl | security | stress | static | unit | e2e | nuclei | lighthouse | monkey | trivy | links | summary"
         exit 1
         ;;
 esac
