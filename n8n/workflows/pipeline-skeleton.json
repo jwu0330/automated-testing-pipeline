@@ -1,5 +1,6 @@
 {
   "name": "Testing Pipeline — Run Project",
+  "description": null,
   "active": false,
   "nodes": [
     {
@@ -9,8 +10,8 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        240,
-        300
+        224,
+        -192
       ]
     },
     {
@@ -32,8 +33,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        520,
-        300
+        544,
+        -192
       ],
       "notes": "設定要跑的專案名稱。\n雙擊修改為 babydodofun / 其他專案。"
     },
@@ -46,8 +47,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        820,
-        300
+        864,
+        -192
       ],
       "onError": "continueRegularOutput",
       "notes": "scope = ssl"
@@ -61,8 +62,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1140,
-        300
+        1088,
+        -192
       ],
       "onError": "continueRegularOutput",
       "notes": "scope = static"
@@ -76,8 +77,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1440,
-        300
+        1312,
+        -192
       ],
       "onError": "continueRegularOutput",
       "notes": "scope = security"
@@ -91,8 +92,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1720,
-        300
+        1520,
+        -192
       ],
       "onError": "continueRegularOutput",
       "notes": "scope = stress"
@@ -106,8 +107,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        2020,
-        300
+        240,
+        64
       ],
       "onError": "continueRegularOutput",
       "notes": "scope = unit"
@@ -121,26 +122,41 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        2320,
-        300
+        528,
+        64
       ],
       "onError": "continueRegularOutput",
       "notes": "scope = e2e"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} summary"
+        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} summary --json"
       },
       "id": "tp-00000000-0000-0000-0000-000000000009",
       "name": "Show Scorecard — 評分卡彙整",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        2900,
-        300
+        848,
+        64
       ],
-      "notes": "呼叫 summarize.js 讀取 reports/<project>/ 的\n所有報告，輸出人類可讀的評分卡",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "notes": "呼叫 summarize.js 讀取 reports/<project>/ 的\n所有報告，輸出人類可讀的評分卡"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// 把 Show Scorecard 的 stdout (JSON 字串) 解析為結構化物件\n// 之後 n8n 的 Schema 檢視會把每個欄位分開顯示\ntry {\n  return JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    exitCode: $json.exitCode,\n  };\n}"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000010",
+      "name": "Parse Scorecard — 結構化評分",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        64
+      ],
+      "notes": "把 Show Scorecard 的 JSON stdout 解析為欄位，n8n Schema 可直接瀏覽。"
     }
   ],
   "connections": {
@@ -231,6 +247,17 @@
           }
         ]
       ]
+    },
+    "Show Scorecard — 評分卡彙整": {
+      "main": [
+        [
+          {
+            "node": "Parse Scorecard — 結構化評分",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -239,7 +266,6 @@
   },
   "staticData": null,
   "pinData": {},
-  "triggerCount": 0,
   "tags": [
     {
       "name": "pipeline"

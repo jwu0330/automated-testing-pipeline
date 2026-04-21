@@ -172,7 +172,45 @@ INSERT INTO m_members (id, phone, name) VALUES
   (2, '0922222222', '測試用戶2');
 ```
 
-Pipeline 啟動時會依檔名順序載入。
+Pipeline 啟動時會依檔名順序載入。若 init.sql 已有 seed 資料可能碰撞，慣例是在最前面放 `00_reset.sql`（TRUNCATE 相關表後 fixtures 成為唯一真相源）。
+
+### 5.4 **專案必須支援的合約**（重要）
+
+pipeline 用環境變數注入測試 DB 連線；但若專案的原始碼有「設定檔優先於環境變數」的邏輯（例：讀 `config.local.php`），測試會被卡在 production 的 localhost。為了讓 DB 整合測試可用，專案的 env loader **必須遵守以下合約**：
+
+| 合約 | 說明 |
+|------|------|
+| `APP_ENV=testing` 時跳過本地 config 檔 | PHPUnit 的 `phpunit.xml` 預設會設 `<env name="APP_ENV" value="testing"/>`；專案的 `env()` 看到這個值時，必須跳過讀取含 production 憑證的檔（如 `private/config.local.php`），改走 `getenv()` → 這樣 pipeline 注入的 `TEST_DB_HOST=test-mysql` 才能生效 |
+| DB 連線名稱不 hard-code | `db()` 等函式必須從 `env()` 拿 DB_HOST/PORT/NAME/USER/PASS，不要寫死字串 |
+| 不在頂層執行副作用 | 被 require 時不要連 DB、不要呼叫外部 API、不要 echo 輸出（lazy init 一切） |
+
+**範例：babydodofun 的 env.php**
+
+```php
+function env(string $key, string $default = ''): string
+{
+    static $cfg = null;
+    if ($cfg === null) {
+        if (getenv('APP_ENV') === 'testing') {
+            $cfg = [];  // ★ 測試模式跳過 config 檔
+        } else {
+            $path = __DIR__ . '/../../private/config.local.php';
+            $cfg = file_exists($path) ? (require $path) : [];
+        }
+    }
+    return $cfg[$key] ?? (getenv($key) ?: $default);
+}
+```
+
+不做這件事，DB 整合測試會連到專案的生產 localhost 憑證（嘗試連不存在的 MySQL socket），不只測試失敗，還可能在有 DNS 解析的環境意外打到真實 DB。
+
+### 5.5 避免測試資料與 fixture 碰撞
+
+專案的整合測試若要用 `INSERT INTO m_members` 建測試用會員，`member_no` / `phone` 等唯一鍵必須避開 fixtures 已有的值。慣例：
+
+- **`member_no`** 用未來日期前綴（如 `+2 years`），fixtures 用今日往回推 → 不會撞
+- **`phone`** 用 `09` + 隨機 8 碼，fixtures 也是隨機 → 碰撞機率極低
+- 整合測試基底類別（如 babydodofun 的 `IntegrationTestCase`）在 `tearDownAfterClass` 清掉自己建的資料
 
 ---
 
