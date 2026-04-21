@@ -64,6 +64,92 @@ services:
       - all
 
   # ─────────────────────────────────────
+  # 深層資安掃描 (Nuclei) — 補 ZAP baseline
+  # 模板化弱點掃描（CVE / 錯誤配置 / 洩漏端點）
+  # ─────────────────────────────────────
+  nuclei:
+    image: projectdiscovery/nuclei:latest
+    container_name: nuclei-scanner
+    volumes:
+      - ./reports:/reports
+    env_file:
+      - .env
+    environment:
+      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - NUCLEI_SEVERITY=${NUCLEI_SEVERITY:-critical,high,medium}
+      - NUCLEI_RATE_LIMIT=${NUCLEI_RATE_LIMIT:-50}
+    # 用 sh 包起來避免 compose 在命令插值時吃掉空字串；同時把 jsonl 輸出到已知路徑
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - >-
+        nuclei
+        -target "$$TARGET_URL"
+        -jsonl-export /reports/nuclei.jsonl
+        -severity "$$NUCLEI_SEVERITY"
+        -rate-limit "$$NUCLEI_RATE_LIMIT"
+        -stats-interval 10
+        -no-color
+        -disable-update-check
+        -silent
+        || echo "nuclei exit $$?"
+    profiles:
+      - nuclei
+      - all
+
+  # ─────────────────────────────────────
+  # 前端品質 (Lighthouse) — 效能 / A11y / 最佳實踐 / SEO
+  # ─────────────────────────────────────
+  lighthouse:
+    build:
+      context: ./tests/lighthouse
+      dockerfile: Dockerfile
+    container_name: lighthouse-runner
+    volumes:
+      - ./tests/lighthouse:/work
+      - ./reports:/reports
+    env_file:
+      - .env
+    environment:
+      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - LIGHTHOUSE_PAGES=${LIGHTHOUSE_PAGES:-/}
+      - LIGHTHOUSE_PRESET=${LIGHTHOUSE_PRESET:-desktop}
+    entrypoint: ["/bin/bash", "/work/lighthouse-run.sh"]
+    profiles:
+      - lighthouse
+      - all
+
+  # ─────────────────────────────────────
+  # 連結檢查 (Lychee) — 壞連結 / 圖片 404
+  # ─────────────────────────────────────
+  lychee:
+    image: lycheeverse/lychee:latest
+    container_name: lychee-runner
+    volumes:
+      - ./reports:/reports
+    env_file:
+      - .env
+    environment:
+      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - LYCHEE_MAX_CONCURRENCY=${LYCHEE_MAX_CONCURRENCY:-4}
+      - LYCHEE_TIMEOUT=${LYCHEE_TIMEOUT:-15}
+    command:
+      - --format
+      - json
+      - --output
+      - /reports/lychee.json
+      - --no-progress
+      - --timeout
+      - "${LYCHEE_TIMEOUT:-15}"
+      - --max-concurrency
+      - "${LYCHEE_MAX_CONCURRENCY:-4}"
+      - "${TARGET_URL:-https://xcity.babydodofun.com}"
+    profiles:
+      - links
+      - all
+
+  # ─────────────────────────────────────
   # 測試 DB（可選）— PHPUnit 整合測試用
   # 只在 run-project.sh 偵測到 .testing/unit/fixtures/*.sql 時啟動
   # 特性：

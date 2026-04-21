@@ -1,0 +1,12 @@
+{
+  "name": "atp-monkey",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gremlins.js-based monkey testing via Playwright. Injects random clicks/typing/scrolling to surface unhandled JS errors.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.52.0"
+  }
+}

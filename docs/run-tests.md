@@ -70,11 +70,16 @@ bash scripts/register-project.sh your-project /path/to/your-project
 | scope | 工具 | 說明 |
 |---|---|---|
 | `ssl` | testssl.sh | SSL/TLS 憑證與協定檢查 |
-| `security` | OWASP ZAP | 安全弱點掃描（XSS/SQLi/CSRF 等） |
+| `security` | OWASP ZAP | 安全弱點掃描基線（XSS/SQLi/CSRF 等） |
+| `nuclei` | Nuclei | 深層資安：模板化 CVE / 錯誤配置掃描 |
 | `stress` | k6 | 壓力／負載測試 |
+| `lighthouse` | Lighthouse | 前端品質：Perf / A11y / 最佳實踐 / SEO |
+| `links` | Lychee | 壞連結 / 圖片 404 檢查 |
 | `static` | PHPStan | 靜態分析 |
+| `trivy` | Trivy fs | 供應鏈：依賴 CVE / 洩漏 secret / 錯誤配置 |
 | `unit` | PHPUnit | 單元測試（見 §4.1） |
 | `e2e` | Playwright | UI/API 端對端測試（見 §4.2） |
+| `monkey` | Gremlins.js | Monkey 測試：隨機亂點亂打，抓未處理 JS 錯誤 |
 | `all`（預設） | 全部 | 依序全部跑一遍、最後產評分卡 |
 | `summary` | summarize.js | 僅彙整既有報告成評分卡 |
 
@@ -263,6 +268,108 @@ babydodofun 的 E2E 設計原則是**只讀**：不登入、不寫資料、不�
 
 ---
 
+### 4.3 通用擴充測試（Nuclei / Lighthouse / Monkey / Trivy / Lychee）
+
+這五個工具皆為**流水線通用**（不需要專案客製測試碼），依 `target_url` 與 `local_path` 自動啟用。
+
+#### 4.3.1 Nuclei — 深層資安
+
+補 ZAP baseline 抓不到的 CVE / 錯誤配置 / 洩漏端點。用 ProjectDiscovery 模板引擎。
+
+```bash
+bash scripts/run-project.sh <project> nuclei
+```
+
+設定（`testing.yml` 可選）：
+
+```yaml
+tests:
+  nuclei:
+    severity: "critical,high,medium"   # 預設；加 low/info 會變超慢
+    rate_limit: 50                     # req/s，共享主機建議 ≤ 50
+```
+
+首次會 pull `projectdiscovery/nuclei:latest`（約 200 MB）。模板自動內嵌 image，無需手動更新；要最新 CVE 請定期 `docker pull`。
+
+#### 4.3.2 Lighthouse — 前端品質
+
+Core Web Vitals / A11y / Best Practices / SEO 四項分數 + LCP / CLS / TBT 指標。
+
+```bash
+bash scripts/run-project.sh <project> lighthouse
+```
+
+設定：
+
+```yaml
+tests:
+  lighthouse:
+    preset: desktop            # desktop | mobile
+    pages: [/, /login.html]    # 預設 [/]
+```
+
+首次會 build `lighthouse:latest` image（`node:20-slim + chromium + lighthouse@12`，約 1 GB，一次）。
+
+#### 4.3.3 Monkey — Gremlins.js 互動探測
+
+注入 gremlins.js 做隨機點擊/打字/滾動，監聽 `pageerror` 未捕獲例外。**抓 E2E spec 寫不到的邊界 bug**。
+
+```bash
+bash scripts/run-project.sh <project> monkey
+```
+
+設定：
+
+```yaml
+tests:
+  monkey:
+    pages: [/, /login.html]    # 預設 [/]
+    attacks: 500               # 總攻擊次數
+    delay_ms: 10               # 每次間隔；總耗時 ≈ attacks * delay_ms
+```
+
+重用 E2E 的 Playwright image，不需額外空間。注入 `gremlins.js` 來自 unpkg CDN，需外網連線。
+
+#### 4.3.4 Trivy — 供應鏈掃描
+
+同時掃 **依賴 CVE / 洩漏 secret / 錯誤配置** 三類。需要 `local_path`。
+
+```bash
+bash scripts/run-project.sh <project> trivy
+```
+
+設定：
+
+```yaml
+tests:
+  trivy:
+    severity: "CRITICAL,HIGH,MEDIUM"     # 注意大寫
+    scanners: "vuln,secret,misconfig"    # 可省略某項
+```
+
+用 `atp-trivy-cache` docker volume 快取 CVE DB，第二次之後跑很快（< 10 秒）。
+
+#### 4.3.5 Lychee — 壞連結檢查
+
+Rust 寫的超快連結檢查器，驗證頁面上所有 `<a>` / `<img>` / `<script>` 是否可達。
+
+```bash
+bash scripts/run-project.sh <project> links
+```
+
+設定：
+
+```yaml
+tests:
+  links:
+    timeout: 15              # 單一連結逾時秒數
+    max_concurrency: 4       # 高的話容易被 rate limit
+```
+
+若目標站引用很多社群連結（FB / IG）會出大量 403，目前骨架未加 exclude 規則，未來會在 testing.yml 補 `exclude` 陣列。
+
+---
+
 ## 5. 檢視報告
 
 ### 5.1 統一報告（建議的總覽）
@@ -281,12 +388,17 @@ bash scripts/run-project.sh <project>
 評分卡的總覽段落範例：
 
 ```
-① SSL/TLS (testssl.sh)     A+  (93/100)  [=]
-② 靜態分析 (PHPStan)         22 個錯誤
-③ 資安掃描 (OWASP ZAP)       High=0  Medium=2  Low=7  Info=4
-④ 壓力測試 (k6)             req=1450  avg=8ms  p95=16ms  fail=0.00%
-⑤ 單元測試 (PHPUnit)         129 tests, 129 pass, 0 fail，覆蓋率 59.9%
-⑥ E2E (Playwright)          18 tests, 18 pass, 0 fail
+① SSL/TLS         A+  (93/100)  [=]
+② 靜態分析        22 個錯誤
+③ 資安掃描        H=0 M=2 L=7 I=4
+④ 壓力測試        p95=16ms  fail=0.00%  reqs=1450
+⑤ 單元測試        129/129 pass, cov=59.9%
+⑥ E2E             18/18 pass
+⑦ 深層資安        C=0 H=1 M=3 L=5
+⑧ 前端品質        Perf=82 A11y=95 BP=93 SEO=100
+⑨ 互動探測        1/1 pass
+⑩ 供應鏈          C=0 H=2 M=7  secrets=0  misconfig=1
+⑪ 連結檢查        48/52 OK  broken=4
 ```
 
 `[=]` / `[↓-1 改善]` 是和上次執行相比的趨勢。
@@ -307,7 +419,14 @@ reports/<project>/
     ├── phpunit-coverage.txt
     ├── coverage/index.html
     ├── playwright/index.html
-    └── playwright-junit.xml
+    ├── playwright-junit.xml
+    ├── nuclei.jsonl                       # ★ Nuclei 一行一 finding
+    ├── lighthouse-manifest.json           # ★ Lighthouse 摘要
+    ├── lighthouse-*-*.report.{html,json}  # ★ 每頁完整報告
+    ├── monkey-report.json                 # ★ Monkey JSON
+    ├── monkey-html/index.html             # ★ Monkey HTML
+    ├── trivy-fs.json                      # ★ Trivy 供應鏈
+    └── lychee.json                        # ★ Lychee 壞連結
 ```
 
 ### 5.3 n8n GUI

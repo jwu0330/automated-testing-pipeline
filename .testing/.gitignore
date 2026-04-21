@@ -1,0 +1,21 @@
+# 敏感值
+.env
+
+# E2E 產物
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/playwright/.cache/
+
+# Monkey 產物
+monkey/node_modules/
+monkey/test-results/
+monkey/playwright-report/
+
+# Unit 產物
+unit/coverage/
+unit/.phpunit.cache/
+
+# 暫存
+*.log
+.DS_Store

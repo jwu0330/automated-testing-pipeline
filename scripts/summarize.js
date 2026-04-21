@@ -231,6 +231,156 @@ function parsePlaywright() {
   } catch (e) { return { status: 'parse-error', error: e.message }; }
 }
 
+// ─── ⑦ Nuclei (JSONL) ────────────────────────────────────
+function parseNuclei() {
+  const p = findRaw('nuclei.jsonl');
+  if (!p) return { status: 'no-report' };
+  try {
+    const lines = read(p).split('\n').filter(Boolean);
+    const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0, unknown: 0 };
+    const findings = [];
+    for (const ln of lines) {
+      try {
+        const f = JSON.parse(ln);
+        const sev = (f.info?.severity || 'unknown').toLowerCase();
+        if (counts[sev] == null) counts[sev] = 0;
+        counts[sev]++;
+        findings.push({
+          severity: sev,
+          name: f.info?.name || f['template-id'] || '',
+          templateId: f['template-id'] || '',
+          url: f['matched-at'] || f.host || '',
+        });
+      } catch { /* skip malformed line */ }
+    }
+    return { ...counts, total: findings.length, findings };
+  } catch (e) { return { status: 'parse-error', error: e.message }; }
+}
+
+// ─── ⑧ Lighthouse (manifest) ─────────────────────────────
+function parseLighthouse() {
+  const p = findRaw('lighthouse-manifest.json');
+  if (!p) return { status: 'no-report' };
+  try {
+    const arr = JSON.parse(read(p));
+    if (!Array.isArray(arr) || !arr.length) return { status: 'parse-error', error: 'empty manifest' };
+    const avg = { performance: 0, accessibility: 0, best_practices: 0, seo: 0 };
+    for (const e of arr) {
+      for (const k of Object.keys(avg)) avg[k] += (e.scores?.[k] ?? 0);
+    }
+    for (const k of Object.keys(avg)) avg[k] = Math.round(avg[k] / arr.length);
+    return { pages: arr, avg };
+  } catch (e) { return { status: 'parse-error', error: e.message }; }
+}
+
+// ─── ⑨ Monkey (Playwright JSON reporter) ─────────────────
+function parseMonkey() {
+  const p = findRaw('monkey-report.json');
+  if (!p) return { status: 'no-report' };
+  try {
+    const data = JSON.parse(read(p));
+    const stats = data.stats || {};
+    const tests = (stats.expected || 0) + (stats.unexpected || 0) + (stats.skipped || 0) + (stats.flaky || 0);
+    const failures = stats.unexpected || 0;
+    const errors = [];
+    const walk = (suites) => {
+      for (const s of (suites || [])) {
+        for (const spec of (s.specs || [])) {
+          for (const t of (spec.tests || [])) {
+            for (const r of (t.results || [])) {
+              if (r.status && r.status !== 'passed' && r.status !== 'skipped') {
+                const msg = r.error?.message ? r.error.message.split('\n')[0].slice(0, 200) : 'failed';
+                errors.push({ test: spec.title, message: msg });
+              }
+            }
+          }
+        }
+        walk(s.suites);
+      }
+    };
+    walk(data.suites);
+    if (tests === 0) return { status: 'parse-error', error: 'no tests found' };
+    return { tests, failures, errors };
+  } catch (e) { return { status: 'parse-error', error: e.message }; }
+}
+
+// ─── ⑩ Trivy (fs) ────────────────────────────────────────
+function parseTrivy() {
+  const p = findRaw('trivy-fs.json');
+  if (!p) return { status: 'no-report' };
+  try {
+    const data = JSON.parse(read(p));
+    const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+    const vulns = [];
+    const secrets = [];
+    const misconfigs = [];
+    for (const r of (data.Results || [])) {
+      for (const v of (r.Vulnerabilities || [])) {
+        const sev = (v.Severity || 'UNKNOWN').toUpperCase();
+        if (counts[sev] == null) counts[sev] = 0;
+        counts[sev]++;
+        vulns.push({
+          id: v.VulnerabilityID,
+          pkg: v.PkgName,
+          installed: v.InstalledVersion,
+          fixed: v.FixedVersion || '',
+          severity: sev,
+          title: (v.Title || '').slice(0, 120),
+          target: r.Target,
+        });
+      }
+      for (const s of (r.Secrets || [])) {
+        secrets.push({
+          title: s.Title,
+          severity: (s.Severity || 'UNKNOWN').toUpperCase(),
+          target: r.Target,
+          line: s.StartLine,
+        });
+      }
+      for (const m of (r.Misconfigurations || [])) {
+        misconfigs.push({
+          id: m.ID,
+          title: m.Title,
+          severity: (m.Severity || 'UNKNOWN').toUpperCase(),
+          target: r.Target,
+        });
+      }
+    }
+    return { ...counts, vulns, secrets, misconfigs, total: vulns.length };
+  } catch (e) { return { status: 'parse-error', error: e.message }; }
+}
+
+// ─── ⑪ Lychee (broken links) ─────────────────────────────
+function parseLychee() {
+  const p = findRaw('lychee.json');
+  if (!p) return { status: 'no-report' };
+  try {
+    const data = JSON.parse(read(p));
+    const broken = [];
+    for (const [source, entries] of Object.entries(data.error_map || {})) {
+      for (const e of (entries || [])) {
+        let statusStr = 'error';
+        if (e.status != null) {
+          if (typeof e.status === 'object') {
+            statusStr = e.status.code ?? e.status.text ?? Object.keys(e.status)[0] ?? 'error';
+          } else {
+            statusStr = String(e.status);
+          }
+        }
+        broken.push({ url: e.url, status: statusStr, source });
+      }
+    }
+    return {
+      total: data.total || 0,
+      successful: data.successful || 0,
+      errors: data.errors || 0,
+      timeouts: data.timeouts || 0,
+      excluded: data.excluded || 0,
+      broken,
+    };
+  } catch (e) { return { status: 'parse-error', error: e.message }; }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 解析
 // ═══════════════════════════════════════════════════════════════
@@ -240,6 +390,11 @@ const z  = parseZAP();
 const k  = parseK6();
 const u  = parsePHPUnit();
 const pw = parsePlaywright();
+const nu = parseNuclei();
+const lh = parseLighthouse();
+const mk = parseMonkey();
+const tv = parseTrivy();
+const lc = parseLychee();
 
 const history = readHistory();
 const prev = history.length ? history[history.length - 1] : null;
@@ -311,6 +466,56 @@ if (pw.status === 'no-report') {
 } else {
   const pass = pw.tests - pw.failures;
   L.push(`⑥ E2E             ${pass}/${pw.tests} pass${trend(pw.failures, prev?.e2e?.failures)}`);
+}
+
+// ⑦ Nuclei
+const nuTotal = nu.status ? null : (nu.total ?? 0);
+if (nu.status === 'no-report') {
+  L.push('⑦ 深層資安        (無報告)');
+} else if (nu.status === 'parse-error') {
+  L.push(`⑦ 深層資安        解析失敗：${nu.error}`);
+} else {
+  L.push(`⑦ 深層資安        C=${nu.critical} H=${nu.high} M=${nu.medium} L=${nu.low}${trend(nuTotal, prev?.nuclei?.total)}`);
+}
+
+// ⑧ Lighthouse
+if (lh.status === 'no-report') {
+  L.push('⑧ 前端品質        (無報告)');
+} else if (lh.status === 'parse-error') {
+  L.push(`⑧ 前端品質        解析失敗：${lh.error}`);
+} else {
+  L.push(`⑧ 前端品質        Perf=${lh.avg.performance} A11y=${lh.avg.accessibility} BP=${lh.avg.best_practices} SEO=${lh.avg.seo}${trend(lh.avg.performance, prev?.lighthouse?.perf, false)}`);
+}
+
+// ⑨ Monkey
+if (mk.status === 'no-report') {
+  L.push('⑨ 互動探測        (無報告)');
+} else if (mk.status === 'parse-error') {
+  L.push(`⑨ 互動探測        解析失敗：${mk.error}`);
+} else {
+  const pass = mk.tests - mk.failures;
+  L.push(`⑨ 互動探測        ${pass}/${mk.tests} pass${trend(mk.failures, prev?.monkey?.failures)}`);
+}
+
+// ⑩ Trivy
+const tvTotal = tv.status ? null : (tv.total + (tv.secrets?.length || 0) + (tv.misconfigs?.length || 0));
+if (tv.status === 'no-report') {
+  L.push('⑩ 供應鏈          (未啟用)');
+} else if (tv.status === 'parse-error') {
+  L.push(`⑩ 供應鏈          解析失敗：${tv.error}`);
+} else {
+  const secCnt = tv.secrets?.length || 0;
+  const misCnt = tv.misconfigs?.length || 0;
+  L.push(`⑩ 供應鏈          C=${tv.CRITICAL} H=${tv.HIGH} M=${tv.MEDIUM}  secrets=${secCnt}  misconfig=${misCnt}${trend(tvTotal, prev?.trivy?.total)}`);
+}
+
+// ⑪ Lychee
+if (lc.status === 'no-report') {
+  L.push('⑪ 連結檢查        (無報告)');
+} else if (lc.status === 'parse-error') {
+  L.push(`⑪ 連結檢查        解析失敗：${lc.error}`);
+} else {
+  L.push(`⑪ 連結檢查        ${lc.total - lc.errors}/${lc.total} OK  broken=${lc.errors}${trend(lc.errors, prev?.links?.errors)}`);
 }
 
 L.push('```');
@@ -415,6 +620,110 @@ if (!pw.status) {
   L.push('');
 }
 
+// ⑦ Nuclei findings
+if (!nu.status && nu.total > 0) {
+  L.push(`### ⑦ 深層資安 Nuclei (${nu.total} findings)`);
+  L.push('');
+  const byLvl = { critical: [], high: [], medium: [], low: [], info: [], unknown: [] };
+  for (const f of nu.findings) (byLvl[f.severity] || byLvl.unknown).push(f);
+  for (const lvl of ['critical', 'high', 'medium', 'low']) {
+    if (!byLvl[lvl].length) continue;
+    L.push(`**${lvl.toUpperCase()} (${byLvl[lvl].length})**`);
+    L.push('');
+    for (const f of byLvl[lvl].slice(0, 20)) {
+      L.push(`- ${f.name}  —  \`${f.templateId}\`  —  \`${f.url}\``);
+    }
+    if (byLvl[lvl].length > 20) L.push(`- _（餘 ${byLvl[lvl].length - 20} 筆見 raw/nuclei.jsonl）_`);
+    L.push('');
+  }
+}
+
+// ⑧ Lighthouse per-page
+if (!lh.status) {
+  L.push('### ⑧ 前端品質 Lighthouse');
+  L.push('');
+  L.push('| 頁面 | Perf | A11y | BP | SEO | LCP | CLS | TBT |');
+  L.push('|------|:----:|:----:|:--:|:---:|----:|----:|----:|');
+  for (const pg of lh.pages) {
+    const relPath = (() => {
+      try { return new URL(pg.url).pathname; } catch { return pg.url; }
+    })();
+    const lcp = pg.metrics?.lcp_ms != null ? `${Math.round(pg.metrics.lcp_ms)}ms` : '—';
+    const cls = pg.metrics?.cls != null ? pg.metrics.cls.toFixed(3) : '—';
+    const tbt = pg.metrics?.tbt_ms != null ? `${Math.round(pg.metrics.tbt_ms)}ms` : '—';
+    L.push(`| \`${relPath}\` | ${pg.scores.performance} | ${pg.scores.accessibility} | ${pg.scores.best_practices} | ${pg.scores.seo} | ${lcp} | ${cls} | ${tbt} |`);
+  }
+  L.push('');
+  L.push(`平均：Perf=${lh.avg.performance} · A11y=${lh.avg.accessibility} · BP=${lh.avg.best_practices} · SEO=${lh.avg.seo}`);
+  L.push('');
+}
+
+// ⑨ Monkey failures
+if (!mk.status) {
+  L.push('### ⑨ 互動探測 Monkey (Gremlins.js)');
+  L.push('');
+  L.push(`- ${mk.tests} tests, ${mk.tests - mk.failures} pass, ${mk.failures} fail`);
+  if (mk.errors.length) {
+    L.push('');
+    L.push('**失敗：**');
+    L.push('');
+    for (const e of mk.errors) {
+      L.push(`- \`${e.test}\` — ${e.message}`);
+    }
+  }
+  L.push('');
+  L.push(`HTML 報告：[\`raw/monkey-html/index.html\`](raw/monkey-html/index.html)`);
+  L.push('');
+}
+
+// ⑩ Trivy findings
+if (!tv.status && (tv.vulns.length + tv.secrets.length + tv.misconfigs.length) > 0) {
+  L.push(`### ⑩ 供應鏈 Trivy (${tv.vulns.length} vulns, ${tv.secrets.length} secrets, ${tv.misconfigs.length} misconfig)`);
+  L.push('');
+  if (tv.vulns.length) {
+    const byLvl = { CRITICAL: [], HIGH: [], MEDIUM: [], LOW: [], UNKNOWN: [] };
+    for (const v of tv.vulns) (byLvl[v.severity] || byLvl.UNKNOWN).push(v);
+    for (const lvl of ['CRITICAL', 'HIGH', 'MEDIUM']) {
+      if (!byLvl[lvl].length) continue;
+      L.push(`**${lvl} (${byLvl[lvl].length})**`);
+      L.push('');
+      for (const v of byLvl[lvl].slice(0, 15)) {
+        const fix = v.fixed ? ` → fixed in \`${v.fixed}\`` : '';
+        L.push(`- \`${v.pkg}@${v.installed}\` — ${v.id}${fix}  \`${v.target}\``);
+      }
+      if (byLvl[lvl].length > 15) L.push(`- _（餘 ${byLvl[lvl].length - 15} 筆見 raw/trivy-fs.json）_`);
+      L.push('');
+    }
+  }
+  if (tv.secrets.length) {
+    L.push(`**Secrets (${tv.secrets.length})**`);
+    L.push('');
+    for (const s of tv.secrets.slice(0, 10)) {
+      L.push(`- \`${s.target}\`:L${s.line} — ${s.title}`);
+    }
+    L.push('');
+  }
+  if (tv.misconfigs.length) {
+    L.push(`**Misconfig (${tv.misconfigs.length})**`);
+    L.push('');
+    for (const m of tv.misconfigs.slice(0, 10)) {
+      L.push(`- [${m.severity}] ${m.id} — ${m.title}  \`${m.target}\``);
+    }
+    L.push('');
+  }
+}
+
+// ⑪ Lychee broken links
+if (!lc.status && lc.broken.length > 0) {
+  L.push(`### ⑪ 連結檢查 Lychee (${lc.broken.length} broken / ${lc.total} total)`);
+  L.push('');
+  for (const b of lc.broken.slice(0, 30)) {
+    L.push(`- [${b.status}] \`${b.url}\`  ← from \`${b.source}\``);
+  }
+  if (lc.broken.length > 30) L.push(`- _（餘 ${lc.broken.length - 30} 筆見 raw/lychee.json）_`);
+  L.push('');
+}
+
 // ─── 歷史 ────────────────────────────────────────────────
 L.push('## 最近執行');
 L.push('');
@@ -433,6 +742,19 @@ const entry = {
     tests: u.tests, failures: u.failures, errors: u.errors, coverage: u.coverage,
   },
   e2e: pw.status ? null : { tests: pw.tests, failures: pw.failures },
+  nuclei: nu.status ? null : {
+    total: nu.total, critical: nu.critical, high: nu.high, medium: nu.medium, low: nu.low,
+  },
+  lighthouse: lh.status ? null : {
+    perf: lh.avg.performance, a11y: lh.avg.accessibility,
+    bp: lh.avg.best_practices, seo: lh.avg.seo,
+  },
+  monkey: mk.status ? null : { tests: mk.tests, failures: mk.failures },
+  trivy: tv.status ? null : {
+    total: tv.total, critical: tv.CRITICAL, high: tv.HIGH, medium: tv.MEDIUM,
+    secrets: tv.secrets.length, misconfigs: tv.misconfigs.length,
+  },
+  links: lc.status ? null : { total: lc.total, errors: lc.errors },
 };
 const recent = history.slice(-4).concat([entry]);
 for (const e of recent) {
@@ -463,6 +785,11 @@ L.push('| `raw/zap-report.html/.json` | ZAP 完整報告 |');
 L.push('| `raw/k6-summary.json` | k6 metrics |');
 L.push('| `raw/phpunit.xml` `raw/coverage/` | PHPUnit JUnit + 覆蓋率 HTML |');
 L.push('| `raw/playwright/index.html` | Playwright HTML 報告 |');
+L.push('| `raw/nuclei.jsonl` | Nuclei findings（JSONL）|');
+L.push('| `raw/lighthouse-manifest.json` `raw/lighthouse-*.report.html` | Lighthouse 摘要 + 每頁 HTML |');
+L.push('| `raw/monkey-report.json` `raw/monkey-html/index.html` | Monkey (Gremlins) JSON + HTML |');
+L.push('| `raw/trivy-fs.json` | Trivy 供應鏈掃描 |');
+L.push('| `raw/lychee.json` | Lychee 壞連結清單 |');
 L.push('');
 
 // ─── 寫檔 ────────────────────────────────────────────────
@@ -493,6 +820,27 @@ const structured = {
   },
   e2e: pw.status ? { status: pw.status } : {
     tests: pw.tests, failures: pw.failures, fails: pw.fails,
+  },
+  nuclei: nu.status ? { status: nu.status } : {
+    total: nu.total, critical: nu.critical, high: nu.high,
+    medium: nu.medium, low: nu.low, info: nu.info,
+    findings: nu.findings,
+  },
+  lighthouse: lh.status ? { status: lh.status } : {
+    avg: lh.avg,
+    pages: lh.pages,
+  },
+  monkey: mk.status ? { status: mk.status } : {
+    tests: mk.tests, failures: mk.failures, errors: mk.errors,
+  },
+  trivy: tv.status ? { status: tv.status } : {
+    total: tv.total, critical: tv.CRITICAL, high: tv.HIGH, medium: tv.MEDIUM,
+    low: tv.LOW, unknown: tv.UNKNOWN,
+    vulns: tv.vulns, secrets: tv.secrets, misconfigs: tv.misconfigs,
+  },
+  links: lc.status ? { status: lc.status } : {
+    total: lc.total, successful: lc.successful, errors: lc.errors,
+    timeouts: lc.timeouts, excluded: lc.excluded, broken: lc.broken,
   },
   history_recent: history.slice(-4).concat([entry]),
   report_md: path.join(REPORT_DIR, 'report.md'),

@@ -85,12 +85,17 @@ project:
 | 測試 | 啟用條件 |
 |------|---------|
 | `ssl` | `target_url` 以 `https://` 開頭 |
-| `security` | 一律啟用 |
+| `security` | 一律啟用（ZAP baseline） |
 | `stress` | 一律啟用（vus=10, duration=30s, pages=[`/`]） |
 | `static` | `local_path` 不為空且掃描到 `.php` 檔（level=5） |
 | `unit` | `.testing/unit/phpunit.xml` 存在 |
 | `e2e` | `.testing/e2e/package.json` 存在 |
 | `unit.use_db` | `.testing/unit/fixtures/*.sql` 存在 → 自動啟動 `test-mysql` 容器 |
+| `nuclei` | 一律啟用（severity=critical,high,medium, rate_limit=50） |
+| `lighthouse` | 一律啟用（preset=desktop, pages=[`/`]） |
+| `monkey` | 一律啟用（pages=[`/`], attacks=500, delay_ms=10） |
+| `trivy` | `local_path` 不為空 → 掃依賴 / secret / misconfig |
+| `links` | 一律啟用（timeout=15, max_concurrency=4） |
 
 ### 3.4 想覆寫預設？在 `testing.yml` 加對應鍵
 
@@ -219,11 +224,16 @@ function env(string $key, string $default = ''): string
 | 測試 | 類型 | 提供者 |
 |------|------|--------|
 | SSL/TLS (testssl.sh) | 通用 | 流水線（僅需 `target_url`） |
-| 資安掃描 (OWASP ZAP) | 通用 | 流水線（僅需 `target_url`） |
+| 資安基線 (OWASP ZAP) | 通用 | 流水線（僅需 `target_url`） |
+| 深層資安 (Nuclei) | 通用 | 流水線（模板化 CVE / 錯誤配置） |
 | 壓力測試 (k6) | 通用 | 流水線（可調 vus/pages） |
+| 前端品質 (Lighthouse) | 通用 | 流水線（可調 preset/pages） |
+| 連結檢查 (Lychee) | 通用 | 流水線（可調 timeout/exclude） |
 | 靜態分析 (PHPStan) | 通用 | 流水線（可客製 `.testing/static/phpstan.neon`） |
+| 供應鏈 (Trivy) | 通用 | 流水線（需 `local_path`） |
 | **單元測試 (PHPUnit)** | **客製** | **專案自己寫在 `.testing/unit/`** |
 | **E2E (Playwright)** | **客製** | **專案自己寫在 `.testing/e2e/`** |
+| 互動探測 (Gremlins monkey) | 通用 | 流水線（可調 pages/attacks/delay_ms） |
 
 ---
 

@@ -17,13 +17,18 @@ project:
 # ─── 以下皆選填；沒寫就用智慧預設 ─────────────────────────────
 #
 # 自動偵測規則：
-#   - tests.ssl.enabled       : target_url 是 https:// 開頭 → 自動開
-#   - tests.static.enabled    : 有 local_path 且掃描到 .php 檔 → 自動開（level 5）
-#   - tests.security.enabled  : 一律開
-#   - tests.stress.enabled    : 一律開（vus=10, duration=30s, pages=[/]）
-#   - tests.unit.enabled      : .testing/unit/phpunit.xml 存在 → 自動開
-#   - tests.e2e.enabled       : .testing/e2e/package.json 存在 → 自動開
-#   - tests.unit.use_db       : .testing/unit/fixtures/*.sql 存在 → 自動起測試用 MySQL 容器
+#   - tests.ssl.enabled        : target_url 是 https:// 開頭 → 自動開
+#   - tests.static.enabled     : 有 local_path 且掃描到 .php 檔 → 自動開（level 5）
+#   - tests.security.enabled   : 一律開
+#   - tests.stress.enabled     : 一律開（vus=10, duration=30s, pages=[/]）
+#   - tests.unit.enabled       : .testing/unit/phpunit.xml 存在 → 自動開
+#   - tests.e2e.enabled        : .testing/e2e/package.json 存在 → 自動開
+#   - tests.unit.use_db        : .testing/unit/fixtures/*.sql 存在 → 自動起測試用 MySQL 容器
+#   - tests.nuclei.enabled     : 一律開（severity=critical,high,medium, rate_limit=50）
+#   - tests.lighthouse.enabled : 一律開（preset=desktop, pages=[/]）
+#   - tests.monkey.enabled     : 一律開（pages=[/], attacks=500, delay_ms=10）
+#   - tests.trivy.enabled      : 有 local_path → 自動開（severity=CRITICAL,HIGH,MEDIUM）
+#   - tests.links.enabled      : 一律開（max_depth=1, timeout=15）
 #
 # 想**覆寫**預設時才填下面；想停用某項寫 `enabled: false`。
 # ────────────────────────────────────────────────────────────
@@ -46,3 +51,25 @@ project:
 #       enabled: true                    # 要登入才設；帳密放 .testing/.env
 #       username_env: E2E_USERNAME
 #       password_env: E2E_PASSWORD
+#
+#   nuclei:
+#     severity: "critical,high,medium"   # 預設；想加 low/info 就列出來
+#     rate_limit: 50                     # req/s，共享主機建議 ≤ 50
+#
+#   lighthouse:
+#     preset: desktop                    # desktop | mobile
+#     pages: [/, /login.html]            # 預設 [/]
+#
+#   monkey:
+#     pages: [/, /login.html]            # 預設 [/]
+#     attacks: 500                       # 總攻擊次數
+#     delay_ms: 10                       # 每次間隔（總耗時 ≈ attacks * delay_ms）
+#
+#   trivy:
+#     severity: "CRITICAL,HIGH,MEDIUM"   # 注意大寫
+#     scanners: "vuln,secret,misconfig"  # 可省略某項
+#
+#   links:
+#     max_depth: 1                       # 0=只檢查 target_url 本頁；1=向下一層
+#     timeout: 15                        # 單一連結逾時秒數
+#     max_concurrency: 4

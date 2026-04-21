@@ -6,7 +6,8 @@
 #   bash scripts/run-project.sh <name> [scope]
 #
 # scope:
-#   all (預設) | ssl | security | stress | static | unit | e2e | summary
+#   all (預設) | ssl | security | stress | static | unit | e2e
+#   nuclei | lighthouse | monkey | trivy | links | summary
 #
 # 設計原則：
 #   - testing.yml 只需 4 個必填欄位（name / target_url / local_path / php_version）
@@ -20,7 +21,7 @@ NAME="${1:-}"
 SCOPE="${2:-all}"
 
 if [ -z "$NAME" ]; then
-    echo "用法：bash scripts/run-project.sh <name> [all|ssl|security|stress|static|unit|e2e|summary]"
+    echo "用法：bash scripts/run-project.sh <name> [all|ssl|security|stress|static|unit|e2e|nuclei|lighthouse|monkey|trivy|links|summary]"
     exit 1
 fi
 
@@ -128,6 +129,11 @@ enabled() {
         e2e)
             $LOCAL_MODE && [ -f "$PROJECT_PATH/.testing/e2e/package.json" ]
             ;;
+        nuclei)     true ;;
+        lighthouse) true ;;
+        monkey)     true ;;
+        trivy)      $LOCAL_MODE ;;
+        links)      true ;;
     esac
 }
 
@@ -330,6 +336,125 @@ run_e2e() {
     echo "  報告：$REPORTS_RAW/playwright/index.html"
 }
 
+# ─── 測試 7：Nuclei（深層資安）────
+run_nuclei() {
+    enabled nuclei || { echo "⏭  Nuclei：略過"; return 0; }
+    echo ""
+    echo "▶ 深層資安掃描 (Nuclei)"
+    echo "──────────────────────────────────────────"
+    NUCLEI_SEVERITY=$(yq -r '.tests.nuclei.severity // "critical,high,medium"' "$TESTING_YML")
+    NUCLEI_RATE_LIMIT=$(yq -r '.tests.nuclei.rate_limit // 50' "$TESTING_YML")
+    export NUCLEI_SEVERITY NUCLEI_RATE_LIMIT
+    rm -f "$ROOT/reports/nuclei.jsonl" 2>/dev/null || true
+    docker compose --profile nuclei up --abort-on-container-exit || echo "  (nuclei 結束碼 $?)"
+    move_report 'nuclei.jsonl'
+    echo "  報告：$REPORTS_RAW/nuclei.jsonl"
+}
+
+# ─── 測試 8：Lighthouse（前端品質）────
+run_lighthouse() {
+    enabled lighthouse || { echo "⏭  Lighthouse：略過"; return 0; }
+    echo ""
+    echo "▶ 前端品質檢測 (Lighthouse)"
+    echo "──────────────────────────────────────────"
+    local pages
+    pages=$(yq -r '(.tests.lighthouse.pages // ["/"]) | join(" ")' "$TESTING_YML")
+    LIGHTHOUSE_PAGES="$pages"
+    LIGHTHOUSE_PRESET=$(yq -r '.tests.lighthouse.preset // "desktop"' "$TESTING_YML")
+    export LIGHTHOUSE_PAGES LIGHTHOUSE_PRESET
+    # 清理舊 lighthouse 報告（只留本次）
+    rm -f "$ROOT/reports"/lighthouse-*.report.* "$ROOT/reports/lighthouse-manifest.json" 2>/dev/null || true
+    docker compose --profile lighthouse up --build --abort-on-container-exit || echo "  (lighthouse 結束碼 $?)"
+    move_report 'lighthouse-*.report.html'
+    move_report 'lighthouse-*.report.json'
+    move_report 'lighthouse-manifest.json'
+    echo "  報告：$REPORTS_RAW/lighthouse-manifest.json"
+}
+
+# ─── 測試 9：Monkey（Gremlins.js via Playwright）────
+run_monkey() {
+    enabled monkey || { echo "⏭  Monkey：略過"; return 0; }
+    echo ""
+    echo "▶ 互動探測 (Monkey — Gremlins.js)"
+    echo "──────────────────────────────────────────"
+    local pages attacks delay
+    pages=$(yq -r '(.tests.monkey.pages // ["/"]) | join(",")' "$TESTING_YML")
+    attacks=$(yq -r '.tests.monkey.attacks // 500' "$TESTING_YML")
+    delay=$(yq -r '.tests.monkey.delay_ms // 10' "$TESTING_YML")
+    local env_args=()
+    [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+    # 清舊報告
+    rm -f "$ROOT/reports/monkey-report.json" 2>/dev/null || true
+    rm -rf "$ROOT/reports/monkey-html" 2>/dev/null || true
+    docker run --rm "${env_args[@]}" \
+        -e TARGET_URL="$TARGET_URL" \
+        -e MONKEY_PAGES="$pages" \
+        -e MONKEY_ATTACKS="$attacks" \
+        -e MONKEY_DELAY_MS="$delay" \
+        -v "$ROOT/tests/monkey:/monkey" \
+        -v "$ROOT/reports:/reports" \
+        -w /monkey \
+        mcr.microsoft.com/playwright:v1.52.0-noble \
+        sh -c '
+            if [ -f package-lock.json ]; then
+                npm ci --no-audit --no-fund
+            else
+                npm install --no-audit --no-fund
+            fi && \
+            npx playwright test
+        ' \
+        || echo "  (monkey 結束碼 $?)"
+    move_report 'monkey-report.json'
+    # monkey-html 是目錄，需另外搬
+    if [ -d "$ROOT/reports/monkey-html" ]; then
+        rm -rf "$REPORTS_RAW/monkey-html"
+        mv "$ROOT/reports/monkey-html" "$REPORTS_RAW/"
+    fi
+    echo "  報告：$REPORTS_RAW/monkey-report.json、$REPORTS_RAW/monkey-html/index.html"
+}
+
+# ─── 測試 10：Trivy（供應鏈）────
+run_trivy() {
+    enabled trivy || { echo "⏭  Trivy：略過（需 local_path）"; return 0; }
+    echo ""
+    echo "▶ 供應鏈掃描 (Trivy fs)"
+    echo "──────────────────────────────────────────"
+    local severity scanners
+    severity=$(yq -r '.tests.trivy.severity // "CRITICAL,HIGH,MEDIUM"' "$TESTING_YML")
+    scanners=$(yq -r '.tests.trivy.scanners // "vuln,secret,misconfig"' "$TESTING_YML")
+    # trivy 快取：避免每次重下 CVE DB
+    local cache_vol="atp-trivy-cache"
+    docker volume create "$cache_vol" >/dev/null 2>&1 || true
+    docker run --rm \
+        -v "$PROJECT_PATH:/src:ro" \
+        -v "$REPORTS_RAW:/reports" \
+        -v "${cache_vol}:/root/.cache/trivy" \
+        aquasec/trivy:latest \
+        fs /src \
+            --scanners "$scanners" \
+            --severity "$severity" \
+            --format json \
+            --output /reports/trivy-fs.json \
+            --quiet \
+        || echo "  (trivy 結束碼 $?)"
+    echo "  報告：$REPORTS_RAW/trivy-fs.json"
+}
+
+# ─── 測試 11：Lychee（壞連結）────
+run_links() {
+    enabled links || { echo "⏭  Links：略過"; return 0; }
+    echo ""
+    echo "▶ 連結檢查 (Lychee)"
+    echo "──────────────────────────────────────────"
+    LYCHEE_TIMEOUT=$(yq -r '.tests.links.timeout // 15' "$TESTING_YML")
+    LYCHEE_MAX_CONCURRENCY=$(yq -r '.tests.links.max_concurrency // 4' "$TESTING_YML")
+    export LYCHEE_TIMEOUT LYCHEE_MAX_CONCURRENCY
+    rm -f "$ROOT/reports/lychee.json" 2>/dev/null || true
+    docker compose --profile links up --abort-on-container-exit || echo "  (lychee 結束碼 $?)"
+    move_report 'lychee.json'
+    echo "  報告：$REPORTS_RAW/lychee.json"
+}
+
 # ─── 產生評分卡 ────
 run_summary() {
     echo ""
@@ -343,22 +468,32 @@ case "$SCOPE" in
     all)
         run_ssl
         run_static
+        run_trivy
         run_security
+        run_nuclei
         run_stress
+        run_lighthouse
+        run_links
         run_unit
         run_e2e
+        run_monkey
         run_summary
         ;;
-    ssl)      run_ssl ;;
-    security) run_security ;;
-    stress)   run_stress ;;
-    static)   run_static ;;
-    unit)     run_unit ;;
-    e2e)      run_e2e ;;
-    summary)  run_summary ;;
+    ssl)        run_ssl ;;
+    security)   run_security ;;
+    stress)     run_stress ;;
+    static)     run_static ;;
+    unit)       run_unit ;;
+    e2e)        run_e2e ;;
+    nuclei)     run_nuclei ;;
+    lighthouse) run_lighthouse ;;
+    monkey)     run_monkey ;;
+    trivy)      run_trivy ;;
+    links)      run_links ;;
+    summary)    run_summary ;;
     *)
         echo "❌ 未知 scope：$SCOPE"
-        echo "   可用：all | ssl | security | stress | static | unit | e2e | summary"
+        echo "   可用：all | ssl | security | stress | static | unit | e2e | nuclei | lighthouse | monkey | trivy | links | summary"
         exit 1
         ;;
 esac

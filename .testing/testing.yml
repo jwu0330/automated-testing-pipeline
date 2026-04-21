@@ -1,0 +1,59 @@
+# ════════════════════════════════════════════════════════════════
+#  testing.yml  —  專案測試設定（4 個必填欄位）
+#
+#  【只能這麼做 / 固定流程】
+#    1. 這個檔必須叫 testing.yml，必須放在 <your-project>/.testing/ 裡
+#    2. 下面 4 個欄位是必填，不能省、不能改名
+#    3. 其他欄位都叫「選填覆寫」，沒寫就走 pipeline 預設
+#
+#  Schema：v2
+# ════════════════════════════════════════════════════════════════
+schema_version: 2
+
+# ─── 必要（4 個欄位，只能這麼寫）─────────────────────────
+project:
+  name: example_project                   # ① 專案識別名稱（英數底線）
+  target_url: https://example.com         # ② 線上測試目標 URL
+  local_path: /absolute/path/to/project   # ③ 本地原始碼絕對路徑（留 "" → 只跑網路測試）
+  php_version: "8.1"                      # ④ PHP 版本（非 PHP 專案留預設即可）
+
+# ─── 可選：指定共用 pipeline 位置 ────────────────────────
+#   若 PIPELINE_HOME 環境變數未設，link.sh 會讀這裡
+# pipeline:
+#   home: /mnt/e/Code/github/automated-testing-pipeline
+
+# ─── 可選：覆寫測試開關／參數 ────────────────────────────
+#   沒寫 → 走自動偵測（見 README 的「自動偵測規則」）
+#
+# tests:
+#   stress:
+#     vus: 20                             # 預設 10
+#     duration: 60s                       # 預設 30s
+#     pages: [/, /login.html]             # 預設 [/]
+#   static:
+#     level: 7                            # 預設 5
+#   unit:
+#     enabled: false                      # 偵測到但強制關掉
+#   e2e:
+#     auth:
+#       enabled: true
+#       username_env: E2E_USERNAME        # 值放 .testing/.env
+#       password_env: E2E_PASSWORD
+#
+#   # ─── v0.3 新增的 5 個通用測試 ───
+#   nuclei:
+#     severity: "critical,high,medium"    # 預設；加 low/info 會變慢
+#     rate_limit: 50                      # req/s，共享主機建議 ≤ 50
+#   lighthouse:
+#     preset: desktop                     # desktop | mobile
+#     pages: [/, /login.html]             # 預設 [/]
+#   monkey:
+#     pages: [/, /login.html]             # 預設 [/]
+#     attacks: 500                        # 總攻擊次數
+#     delay_ms: 10                        # 總耗時 ≈ attacks * delay_ms
+#   trivy:
+#     severity: "CRITICAL,HIGH,MEDIUM"    # 注意大寫
+#     scanners: "vuln,secret,misconfig"
+#   links:
+#     timeout: 15                         # 單一連結秒數
+#     max_concurrency: 4

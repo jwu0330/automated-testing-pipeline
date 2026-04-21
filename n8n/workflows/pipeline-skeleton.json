@@ -1,4 +1,5 @@
 {
+  "id": "oNnWI3Ohcxh0ptqX",
   "name": "Testing Pipeline — Run Project",
   "description": null,
   "active": false,
@@ -9,10 +10,7 @@
       "name": "Manual Trigger — 手動觸發",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [
-        224,
-        -192
-      ]
+      "position": [224, -192]
     },
     {
       "parameters": {
@@ -32,11 +30,8 @@
       "name": "Set Project Vars — 設定專案",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [
-        544,
-        -192
-      ],
-      "notes": "設定要跑的專案名稱。\n雙擊修改為 babydodofun / 其他專案。"
+      "position": [544, -192],
+      "notes": "設定要跑的專案名稱。雙擊修改為 babydodofun / 其他專案。"
     },
     {
       "parameters": {
@@ -46,10 +41,7 @@
       "name": "Run SSL Scan — SSL 憑證檢測",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        864,
-        -192
-      ],
+      "position": [864, -192],
       "onError": "continueRegularOutput",
       "notes": "scope = ssl"
     },
@@ -61,27 +53,45 @@
       "name": "Run Static Analysis — 靜態程式碼分析",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        1088,
-        -192
-      ],
+      "position": [1088, -192],
       "onError": "continueRegularOutput",
       "notes": "scope = static"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} trivy"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000011",
+      "name": "Run Trivy — 供應鏈掃描",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1312, -192],
+      "onError": "continueRegularOutput",
+      "notes": "scope = trivy（依賴 CVE / secrets / misconfig）"
     },
     {
       "parameters": {
         "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} security"
       },
       "id": "tp-00000000-0000-0000-0000-000000000005",
-      "name": "Run Security Scan — 弱點掃描",
+      "name": "Run Security Scan — 弱點掃描 (ZAP)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        1312,
-        -192
-      ],
+      "position": [1536, -192],
       "onError": "continueRegularOutput",
-      "notes": "scope = security"
+      "notes": "scope = security（OWASP ZAP baseline）"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} nuclei"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000012",
+      "name": "Run Nuclei — 深層資安",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1760, -192],
+      "onError": "continueRegularOutput",
+      "notes": "scope = nuclei（CVE / 錯誤配置模板掃描）"
     },
     {
       "parameters": {
@@ -91,12 +101,33 @@
       "name": "Run Load Test — 壓力測試",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        1520,
-        -192
-      ],
+      "position": [224, 64],
       "onError": "continueRegularOutput",
       "notes": "scope = stress"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} lighthouse"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000013",
+      "name": "Run Lighthouse — 前端品質",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [448, 64],
+      "onError": "continueRegularOutput",
+      "notes": "scope = lighthouse（Perf / A11y / BP / SEO）"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} links"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000014",
+      "name": "Run Lychee — 連結檢查",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [672, 64],
+      "onError": "continueRegularOutput",
+      "notes": "scope = links（壞連結 / 圖片 404）"
     },
     {
       "parameters": {
@@ -106,10 +137,7 @@
       "name": "Run Unit Tests — 單元測試",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        240,
-        64
-      ],
+      "position": [896, 64],
       "onError": "continueRegularOutput",
       "notes": "scope = unit"
     },
@@ -121,12 +149,21 @@
       "name": "Run E2E Tests — 端對端測試",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        528,
-        64
-      ],
+      "position": [1120, 64],
       "onError": "continueRegularOutput",
       "notes": "scope = e2e"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} monkey"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000015",
+      "name": "Run Monkey — Gremlins 互動探測",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1344, 64],
+      "onError": "continueRegularOutput",
+      "notes": "scope = monkey（隨機點擊 / 打字 / 滾動，抓未處理 JS 錯誤）"
     },
     {
       "parameters": {
@@ -136,12 +173,9 @@
       "name": "Show Scorecard — 評分卡彙整",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        848,
-        64
-      ],
+      "position": [1568, 64],
       "onError": "continueRegularOutput",
-      "notes": "呼叫 summarize.js 讀取 reports/<project>/ 的\n所有報告，輸出人類可讀的評分卡"
+      "notes": "呼叫 summarize.js 讀取 reports/<project>/ 的所有報告，輸出人類可讀的評分卡"
     },
     {
       "parameters": {
@@ -152,112 +186,52 @@
       "name": "Parse Scorecard — 結構化評分",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1312,
-        64
-      ],
+      "position": [1792, 64],
       "notes": "把 Show Scorecard 的 JSON stdout 解析為欄位，n8n Schema 可直接瀏覽。"
     }
   ],
   "connections": {
     "Manual Trigger — 手動觸發": {
-      "main": [
-        [
-          {
-            "node": "Set Project Vars — 設定專案",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Set Project Vars — 設定專案", "type": "main", "index": 0 }]]
     },
     "Set Project Vars — 設定專案": {
-      "main": [
-        [
-          {
-            "node": "Run SSL Scan — SSL 憑證檢測",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Run SSL Scan — SSL 憑證檢測", "type": "main", "index": 0 }]]
     },
     "Run SSL Scan — SSL 憑證檢測": {
-      "main": [
-        [
-          {
-            "node": "Run Static Analysis — 靜態程式碼分析",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Run Static Analysis — 靜態程式碼分析", "type": "main", "index": 0 }]]
     },
     "Run Static Analysis — 靜態程式碼分析": {
-      "main": [
-        [
-          {
-            "node": "Run Security Scan — 弱點掃描",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Run Trivy — 供應鏈掃描", "type": "main", "index": 0 }]]
     },
-    "Run Security Scan — 弱點掃描": {
-      "main": [
-        [
-          {
-            "node": "Run Load Test — 壓力測試",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Run Trivy — 供應鏈掃描": {
+      "main": [[{ "node": "Run Security Scan — 弱點掃描 (ZAP)", "type": "main", "index": 0 }]]
+    },
+    "Run Security Scan — 弱點掃描 (ZAP)": {
+      "main": [[{ "node": "Run Nuclei — 深層資安", "type": "main", "index": 0 }]]
+    },
+    "Run Nuclei — 深層資安": {
+      "main": [[{ "node": "Run Load Test — 壓力測試", "type": "main", "index": 0 }]]
     },
     "Run Load Test — 壓力測試": {
-      "main": [
-        [
-          {
-            "node": "Run Unit Tests — 單元測試",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Run Lighthouse — 前端品質", "type": "main", "index": 0 }]]
+    },
+    "Run Lighthouse — 前端品質": {
+      "main": [[{ "node": "Run Lychee — 連結檢查", "type": "main", "index": 0 }]]
+    },
+    "Run Lychee — 連結檢查": {
+      "main": [[{ "node": "Run Unit Tests — 單元測試", "type": "main", "index": 0 }]]
     },
     "Run Unit Tests — 單元測試": {
-      "main": [
-        [
-          {
-            "node": "Run E2E Tests — 端對端測試",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Run E2E Tests — 端對端測試", "type": "main", "index": 0 }]]
     },
     "Run E2E Tests — 端對端測試": {
-      "main": [
-        [
-          {
-            "node": "Show Scorecard — 評分卡彙整",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Run Monkey — Gremlins 互動探測", "type": "main", "index": 0 }]]
+    },
+    "Run Monkey — Gremlins 互動探測": {
+      "main": [[{ "node": "Show Scorecard — 評分卡彙整", "type": "main", "index": 0 }]]
     },
     "Show Scorecard — 評分卡彙整": {
-      "main": [
-        [
-          {
-            "node": "Parse Scorecard — 結構化評分",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Parse Scorecard — 結構化評分", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
@@ -267,8 +241,6 @@
   "staticData": null,
   "pinData": {},
   "tags": [
-    {
-      "name": "pipeline"
-    }
+    { "name": "pipeline" }
   ]
 }
