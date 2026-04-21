@@ -7,9 +7,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const project = process.argv[2];
+const args = process.argv.slice(2);
+const project = args.find(a => !a.startsWith('--'));
+const asJson = args.includes('--json');
 if (!project) {
-  console.error('用法：node scripts/summarize.js <project-name>');
+  console.error('用法：node scripts/summarize.js <project-name> [--json]');
   process.exit(2);
 }
 
@@ -98,6 +100,45 @@ function parseZAP() {
   return counts;
 }
 
+// ─── ⑤ PHPUnit：JUnit XML testsuite 計數 + 覆蓋率文字檔 ───
+function parsePHPUnit() {
+  const p = path.join(REPORTS, 'phpunit.xml');
+  if (!exists(p)) return { status: 'no-report' };
+  try {
+    const xml = read(p);
+    const m = xml.match(/<testsuite[^>]*?tests="(\d+)"[^>]*?(?:failures="(\d+)")?[^>]*?(?:errors="(\d+)")?/);
+    if (!m) return { status: 'parse-error', error: 'no testsuite match' };
+    const tests = +m[1];
+    const failures = +(m[2] || 0);
+    const errors = +(m[3] || 0);
+
+    // 覆蓋率：phpunit-coverage.txt 的 "Lines:   X.XX%" 行
+    let coverage = null;
+    const cov = path.join(REPORTS, 'phpunit-coverage.txt');
+    if (exists(cov)) {
+      const m2 = read(cov).match(/Lines:\s+(\d+\.\d+)%/);
+      if (m2) coverage = parseFloat(m2[1]);
+    }
+    return { tests, failures, errors, coverage };
+  } catch (e) {
+    return { status: 'parse-error', error: e.message };
+  }
+}
+
+// ─── ⑥ Playwright：JUnit XML testsuites 計數 ───
+function parsePlaywright() {
+  const p = path.join(REPORTS, 'playwright-junit.xml');
+  if (!exists(p)) return { status: 'no-report' };
+  try {
+    const xml = read(p);
+    const m = xml.match(/<testsuites[^>]*?tests="(\d+)"[^>]*?(?:failures="(\d+)")?/);
+    if (!m) return { status: 'parse-error', error: 'no testsuites match' };
+    return { tests: +m[1], failures: +(m[2] || 0) };
+  } catch (e) {
+    return { status: 'parse-error', error: e.message };
+  }
+}
+
 // ─── ④ k6：JSON metrics ────────────────────────────────────
 function parseK6() {
   const p = path.join(REPORTS, 'k6-summary.json');
@@ -124,8 +165,10 @@ const s = parseSSL();
 const ps = parsePHPStan();
 const z = parseZAP();
 const k = parseK6();
-const hasUnit = exists(path.join(REPORTS, 'phpunit.xml'));
-const hasE2E = exists(path.join(REPORTS, 'playwright'));
+const u = parsePHPUnit();
+const pw = parsePlaywright();
+const hasUnit = u.status !== 'no-report';
+const hasE2E = pw.status !== 'no-report';
 
 // ─── 讀取上一次結果（用來顯示趨勢）──────────────────────────
 const history = readHistory();
@@ -142,8 +185,11 @@ const entry = {
     fail: +k.failedPct.toFixed(2),
     reqs: k.totalReqs,
   },
-  unit: hasUnit,
-  e2e: hasE2E,
+  unit: (u.status) ? null : {
+    tests: u.tests, failures: u.failures, errors: u.errors,
+    coverage: u.coverage,
+  },
+  e2e: (pw.status) ? null : { tests: pw.tests, failures: pw.failures },
 };
 
 const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
@@ -179,8 +225,26 @@ if (k.status === 'no-report') {
   lines.push(`④ 壓力測試 (k6)             req=${k.totalReqs}  avg=${Math.round(k.avgMs)}ms  p95=${p95}ms  fail=${k.failedPct.toFixed(2)}%${trend(p95, prev?.k6?.p95)}`);
 }
 
-lines.push(`⑤ 單元測試 (PHPUnit)         ${hasUnit ? '有報告（JUnit XML）' : '未啟用'}`);
-lines.push(`⑥ E2E (Playwright)         ${hasE2E ? '有報告' : '未啟用'}`);
+if (u.status === 'no-report') {
+  lines.push('⑤ 單元測試 (PHPUnit)         未啟用');
+} else if (u.status === 'parse-error') {
+  lines.push(`⑤ 單元測試 (PHPUnit)         解析失敗：${u.error}`);
+} else {
+  const pass = u.tests - u.failures - u.errors;
+  const cov = u.coverage != null ? `，覆蓋率 ${u.coverage.toFixed(1)}%` : '';
+  const prevFail = prev?.unit ? (prev.unit.failures + prev.unit.errors) : null;
+  const curFail = u.failures + u.errors;
+  lines.push(`⑤ 單元測試 (PHPUnit)         ${u.tests} tests, ${pass} pass, ${curFail} fail${cov}${trend(curFail, prevFail)}`);
+}
+
+if (pw.status === 'no-report') {
+  lines.push('⑥ E2E (Playwright)          未啟用');
+} else if (pw.status === 'parse-error') {
+  lines.push(`⑥ E2E (Playwright)          解析失敗：${pw.error}`);
+} else {
+  const pass = pw.tests - pw.failures;
+  lines.push(`⑥ E2E (Playwright)          ${pw.tests} tests, ${pass} pass, ${pw.failures} fail${trend(pw.failures, prev?.e2e?.failures)}`);
+}
 
 // ─── 最近執行紀錄 ─────────────────────────────────────────
 lines.push('');
@@ -211,4 +275,41 @@ appendHistory(entry);
 
 const out = lines.join('\n');
 fs.writeFileSync(path.join(REPORTS, 'summary.md'), out + '\n');
-console.log(out);
+
+// ─── stdout 輸出 ──────────────────────────────────────────
+// --json：結構化給 n8n 用（Schema 檢視會分欄顯示）
+// 預設（text）：人類可讀給 terminal / summary.md 用
+if (asJson) {
+  const history2 = readHistory();
+  console.log(JSON.stringify({
+    project,
+    timestamp: now,
+    ssl: s.status === 'no-report' ? null : {
+      grade: s.grade || 'N/A',
+      score: parseInt(s.score, 10) || null,
+    },
+    static: ps.status ? { status: ps.status } : {
+      errors: ps.total,
+      top_files: ps.top,
+    },
+    zap: z.status === 'no-report' ? null : {
+      high: z.High, medium: z.Medium, low: z.Low, info: z.Informational,
+    },
+    k6: k.status ? { status: k.status } : {
+      p95_ms: Math.round(k.p95Ms),
+      avg_ms: Math.round(k.avgMs),
+      failed_pct: +k.failedPct.toFixed(2),
+      total_reqs: k.totalReqs,
+    },
+    unit: { enabled: hasUnit },
+    e2e: { enabled: hasE2E },
+    history: {
+      total_runs: history2.length,
+      recent: history2.slice(-5),
+    },
+    reports_dir: REPORTS,
+    summary_md: path.join(REPORTS, 'summary.md'),
+  }, null, 2));
+} else {
+  console.log(out);
+}
