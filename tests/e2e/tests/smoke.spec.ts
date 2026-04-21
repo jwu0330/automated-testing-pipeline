@@ -1,16 +1,29 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * 通用煙霧測試（Smoke Tests）
+ * 通用煙霧測試（Smoke Tests）— 公版
  *
  * 這些測試對任何 PHP 網站都適用，不依賴專案特定邏輯。
  * 各專案可在 .testing/e2e/tests/ 下新增自己的 spec.ts 擴充。
+ *
+ * 原則：
+ *   - 只做 GET / 讀取操作，不寫入資料
+ *   - 可容忍 redirect（2xx/3xx 都算通過）
+ *   - 回應時間設上限，避免站壞掉還判通過
  */
 
 test.describe('通用煙霧測試', () => {
   test('首頁 HTTP 狀態碼 < 400', async ({ request }) => {
     const res = await request.get('/');
     expect(res.status(), `GET / 回傳 ${res.status()}`).toBeLessThan(400);
+  });
+
+  test('首頁回應時間 < 5 秒', async ({ request }) => {
+    const t0 = Date.now();
+    const res = await request.get('/');
+    const elapsed = Date.now() - t0;
+    expect(res.ok(), `HTTP ${res.status()}`).toBeTruthy();
+    expect(elapsed, `耗時 ${elapsed}ms`).toBeLessThan(5_000);
   });
 
   test('首頁能在瀏覽器載入', async ({ page }) => {
@@ -42,5 +55,13 @@ test.describe('安全標頭檢查', () => {
     const res = await request.get('/');
     test.skip(!res.url().startsWith('https://'), '非 HTTPS，略過');
     expect(res.headers()['strict-transport-security']).toBeTruthy();
+  });
+
+  test('首頁應具備 X-Content-Type-Options: nosniff', async ({ request }) => {
+    const res = await request.get('/');
+    // 非強制，但現代站都該設。找不到時給明確訊息而不是硬 fail
+    const xcto = res.headers()['x-content-type-options'];
+    test.skip(!xcto, '未設定 X-Content-Type-Options（建議補上）');
+    expect(xcto).toMatch(/nosniff/i);
   });
 });

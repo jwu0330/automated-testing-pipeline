@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    PHPUnit 通用範本
+    PHPUnit 通用範本 — 公版
 
-    本檔案是流水線提供的「模板」，不會直接執行。
+    本檔案是流水線提供的「範本」，不會直接執行。
     各專案必須在 <project>/.testing/unit/phpunit.xml 自行建立。
-    建議複製本檔為起點。
+    建議複製本檔為起點，再依專案原始碼結構調整 <source><include>。
 
     參考：https://docs.phpunit.de/en/10.5/configuration.html
 -->
@@ -15,7 +15,8 @@
          cacheDirectory=".phpunit.cache"
          executionOrder="random"
          failOnWarning="true"
-         failOnRisky="true">
+         failOnRisky="true"
+         displayDetailsOnTestsThatTriggerWarnings="true">
 
     <testsuites>
         <testsuite name="default">
@@ -23,16 +24,44 @@
         </testsuite>
     </testsuites>
 
-    <source>
+    <!--
+        <source> 同時定義：
+        1. 要納入覆蓋率計算的路徑
+        2. deprecation/notice/warning 的嚴格模式範圍
+
+        請依專案實際原始碼結構修改 <include> 與 <exclude>。
+    -->
+    <source restrictDeprecations="true"
+            restrictNotices="true"
+            restrictWarnings="true">
         <include>
-            <directory>../../htdocs</directory>
+            <directory>../../public</directory>
             <directory>../../includes</directory>
         </include>
         <exclude>
             <directory>../../vendor</directory>
             <directory>../../node_modules</directory>
+            <directory>../../.testing</directory>
+            <directory>../../local</directory>
         </exclude>
     </source>
+
+    <!--
+        覆蓋率輸出（需要 pcov 或 xdebug；pipeline 的 testing-pipeline-phpunit image 已內建 pcov）
+
+        輸出位置 /reports/... 是 run-project.sh 在 docker run 時掛載的。
+        報告檔：
+          - HTML 詳細報告：<reports>/<project>/coverage/index.html
+          - Clover XML：  <reports>/<project>/phpunit-clover.xml
+          - Text 摘要：   <reports>/<project>/phpunit-coverage.txt
+    -->
+    <coverage includeUncoveredFiles="true">
+        <report>
+            <html outputDirectory="/reports/coverage" lowUpperBound="50" highLowerBound="90"/>
+            <clover outputFile="/reports/phpunit-clover.xml"/>
+            <text outputFile="/reports/phpunit-coverage.txt" showOnlySummary="true"/>
+        </report>
+    </coverage>
 
     <php>
         <env name="APP_ENV" value="testing"/>

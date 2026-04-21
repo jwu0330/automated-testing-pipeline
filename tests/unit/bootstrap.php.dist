@@ -1,0 +1,40 @@
+<?php
+/**
+ * PHPUnit bootstrap 範本 — 公版
+ *
+ * 本檔案是流水線提供的「範本」，不會直接執行。
+ * 各專案必須複製到 <project>/.testing/unit/bootstrap.php 並調整。
+ *
+ * 用途：
+ *   - 在跑測試前載入專案要被測的程式碼
+ *   - 注入 stub / mock，讓純函式可被獨立測試（不必連 DB / 呼叫外部 API）
+ *
+ * 兩種常見情境：
+ *
+ * A. 專案已有 composer autoload
+ *    ───────────────────────────
+ *    require_once __DIR__ . '/../../vendor/autoload.php';
+ *
+ * B. 專案是老式 require-based（如 WordPress、CodeIgniter 或自製）
+ *    ────────────────────────────────────────────────────
+ *    require_once __DIR__ . '/stubs.php';                                // 先打補丁
+ *    require_once __DIR__ . '/../../public/api/helpers.php';             // 再載入實際程式
+ *
+ * 關於 stubs.php：
+ *   如果專案的原始碼會呼叫 `db()`, `json_response()`, `env()` 等全域函式，
+ *   而這些在測試環境拿不到（沒有 DB 連線、沒有 HTTP context），
+ *   可以在 .testing/unit/stubs.php 內先定義空殼函式，避免載入時 fatal error。
+ *   例：
+ *     if (!function_exists('db')) {
+ *         function db(): \PDO { throw new \RuntimeException('db() unavailable in unit tests'); }
+ *     }
+ *
+ * 參考：https://docs.phpunit.de/en/10.5/configuration.html#the-bootstrap-attribute
+ */
+
+// ── 範例 A：composer 專案 ──
+// require_once __DIR__ . '/../../vendor/autoload.php';
+
+// ── 範例 B：老式 require 專案 ──
+// require_once __DIR__ . '/stubs.php';
+// require_once __DIR__ . '/../../public/api/YOUR_HELPERS.php';

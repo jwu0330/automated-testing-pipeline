@@ -164,6 +164,8 @@ run_static() {
 }
 
 # ─── 測試 5：PHPUnit 單元測試 ───
+# 使用 pipeline 自建的 testing-pipeline-phpunit image（含 pcov 覆蓋率擴充）
+# Dockerfile：tests/unit/Dockerfile
 run_unit() {
     enabled unit || { echo "⏭  Unit：已停用"; return 0; }
     if [ ! -d "$PROJECT_PATH/.testing/unit" ]; then
@@ -171,24 +173,32 @@ run_unit() {
         return 0
     fi
     echo ""
-    echo "▶ 單元測試 (PHPUnit)"
+    echo "▶ 單元測試 (PHPUnit + pcov)"
     echo "──────────────────────────────────────────"
     local php_ver
     php_ver=$(yq -r '.project.stack.php_version // "8.1"' "$TESTING_YML")
+    local image="testing-pipeline-phpunit:php${php_ver}"
+
+    # 首次使用 / image 不在 → 依專案 PHP 版本建置
+    if ! docker image inspect "$image" >/dev/null 2>&1; then
+        echo "  首次使用，建置 $image（預計 1–2 分鐘）..."
+        docker build --build-arg PHP_VERSION="$php_ver" \
+            -t "$image" \
+            "$ROOT/tests/unit/"
+    fi
+
     local env_args=()
     [ -f "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
     docker run --rm "${env_args[@]}" \
         -v "$PROJECT_PATH:/project" \
         -v "$REPORTS_DIR:/reports" \
-        -w /project/.testing/unit \
-        "php:${php_ver}-cli" \
-        sh -c '
-            if [ ! -f /usr/local/bin/phpunit ]; then
-                curl -sLo /usr/local/bin/phpunit https://phar.phpunit.de/phpunit.phar
-                chmod +x /usr/local/bin/phpunit
-            fi
-            phpunit --log-junit /reports/phpunit.xml
-        '
+        "$image" \
+            --log-junit=/reports/phpunit.xml \
+            --coverage-html=/reports/coverage \
+            --coverage-clover=/reports/phpunit-clover.xml \
+            --coverage-text=/reports/phpunit-coverage.txt \
+        || echo "  (phpunit 結束碼 $?)"
+    echo "  報告：$REPORTS_DIR/phpunit.xml、$REPORTS_DIR/coverage/index.html"
 }
 
 # ─── 測試 6：Playwright E2E ───
@@ -210,7 +220,16 @@ run_e2e() {
         -v "$REPORTS_DIR:/reports" \
         -w /e2e \
         mcr.microsoft.com/playwright:v1.52.0-noble \
-        sh -c 'npm ci --no-audit --no-fund && npx playwright test --reporter=html,list'
+        sh -c '
+            if [ -f package-lock.json ]; then
+                npm ci --no-audit --no-fund
+            else
+                npm install --no-audit --no-fund
+            fi && \
+            npx playwright test
+        ' \
+        || echo "  (playwright 結束碼 $?)"
+    echo "  報告：$REPORTS_DIR/playwright/index.html"
 }
 
 # ─── 測試 7：產生評分卡 ───
