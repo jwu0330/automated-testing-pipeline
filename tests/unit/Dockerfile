@@ -22,6 +22,7 @@ RUN apt-get update \
         unzip \
         ca-certificates \
         curl \
+    && docker-php-ext-install -j"$(nproc)" pdo pdo_mysql \
     && pecl install pcov \
     && docker-php-ext-enable pcov \
     && echo "pcov.directory=/project" > /usr/local/etc/php/conf.d/pcov-scope.ini \

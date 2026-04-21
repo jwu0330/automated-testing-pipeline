@@ -1,72 +1,48 @@
 # ════════════════════════════════════════════════════════════════
-# testing.yml — 專案測試設定範本
+# testing.yml — 專案測試設定
 #
-# 使用方式：
-#   cp scripts/testing-yml-template.yml <your-project>/.testing/testing.yml
-#   然後編輯 .testing/testing.yml 填入實際值
-#
-# 版本：schema_version = 1
-# 規範：see docs/project-convention.md
+# 用法：cp 此檔 → <your-project>/.testing/testing.yml → 改 4 個必填欄位
+# 規範：docs/project-convention.md
+# Schema：v2
 # ════════════════════════════════════════════════════════════════
-schema_version: 1
+schema_version: 2
 
-# ─── 專案識別 ───────────────────────────────────────────────────
+# ─── 必填 4 欄位（僅此 4 個不能省）────────────────────────────
 project:
-  name: example_project              # 必填：唯一名稱（英數、底線）
-  display_name: Example Project      # 選填：顯示用名稱
-  target_url: https://example.com    # 必填：遠端測試目標 URL
-  stack:
-    language: php                    # php | node | python
-    php_version: "8.1"               # 若 language=php 時填寫
-    database: mysql                  # mysql | mariadb | postgres | none
-    hosting: pseudo                  # pseudo(遠振) | aws | local
-  tags: []                           # 自由標籤，例如 [iot, admin-panel, ecommerce]
+  name: example_project                  # ① 專案識別名稱（英數底線，用於 reports/<name>/）
+  target_url: https://example.com        # ② 線上測試目標 URL（SSL/ZAP/k6/E2E 用）
+  local_path: /absolute/path/to/project  # ③ 本地原始碼路徑（留空或設為 ""  → 只跑網路測試，不跑 static/unit/e2e）
+  php_version: "8.1"                     # ④ PHP 版本（決定 PHPUnit Docker image；非 PHP 專案留此預設即可）
 
-# ─── 原始碼位置（相對於 .testing/）─────────────────────────────
-source:
-  root: "../"                        # 預設：專案根目錄
-  paths_to_scan:                     # 靜態分析要掃描的路徑
-    - htdocs
-    - includes
-  exclude:                           # 排除目錄
-    - vendor
-    - node_modules
-    - .git
-    - .testing/fixtures
+# ─── 以下皆選填；沒寫就用智慧預設 ─────────────────────────────
+#
+# 自動偵測規則：
+#   - tests.ssl.enabled       : target_url 是 https:// 開頭 → 自動開
+#   - tests.static.enabled    : 有 local_path 且掃描到 .php 檔 → 自動開（level 5）
+#   - tests.security.enabled  : 一律開
+#   - tests.stress.enabled    : 一律開（vus=10, duration=30s, pages=[/]）
+#   - tests.unit.enabled      : .testing/unit/phpunit.xml 存在 → 自動開
+#   - tests.e2e.enabled       : .testing/e2e/package.json 存在 → 自動開
+#   - tests.unit.use_db       : .testing/unit/fixtures/*.sql 存在 → 自動起測試用 MySQL 容器
+#
+# 想**覆寫**預設時才填下面；想停用某項寫 `enabled: false`。
+# ────────────────────────────────────────────────────────────
 
-# ─── 測試開關與設定 ────────────────────────────────────────────
-tests:
-  # ─── 通用測試（流水線提供） ───
-  ssl:
-    enabled: true
-    # testssl.sh 不需要額外設定
-
-  security:
-    enabled: true
-    level: WARN                      # WARN | INFO | FAIL
-
-  stress:
-    enabled: true
-    vus: 10                          # 虛擬使用者數（遠振共享主機建議 ≤ 10）
-    duration: 30s                    # 測試時長
-    pages:                           # 要測試的頁面（相對 target_url）
-      - /
-      - /login.html
-
-  static:
-    enabled: true
-    level: 5                         # PHPStan level 0-9
-    config: null                     # 選填：.testing/static/phpstan.neon（客製覆寫）
-
-  # ─── 客製測試（專案開發者撰寫） ───
-  unit:
-    enabled: false                   # 啟用前需要 .testing/unit/phpunit.xml
-    phpunit_config: unit/phpunit.xml
-
-  e2e:
-    enabled: false                   # 啟用前需要 .testing/e2e/package.json
-    specs: e2e/tests/
-    auth:
-      enabled: false                 # 登入流程需要時才開
-      username_env: E2E_USERNAME     # 從 .env 讀取，不要寫死帳密
-      password_env: E2E_PASSWORD
+# tests:
+#   static:
+#     level: 7                           # 預設 5，要更嚴就填
+#     paths_to_scan: [public, includes]  # 預設自動偵測
+#
+#   stress:
+#     vus: 20                            # 預設 10（共享主機建議 ≤ 10）
+#     duration: 60s                      # 預設 30s
+#     pages: [/, /login.html, /api/health.php]
+#
+#   unit:
+#     enabled: false                     # 若自動偵測到但不想跑，強制關掉
+#
+#   e2e:
+#     auth:
+#       enabled: true                    # 要登入才設；帳密放 .testing/.env
+#       username_env: E2E_USERNAME
+#       password_env: E2E_PASSWORD
