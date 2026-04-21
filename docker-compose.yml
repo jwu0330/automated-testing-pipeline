@@ -92,6 +92,9 @@ services:
       dockerfile: Dockerfile
     container_name: n8n
     restart: unless-stopped
+    # 讓 node user 取得宿主機 docker socket 的 GID（避免 permission denied）
+    group_add:
+      - "989"
     ports:
       - "${N8N_PORT:-5678}:5678"
     environment:
@@ -109,8 +112,9 @@ services:
       - n8n_data:/home/node/.n8n
       # Docker-outside-of-Docker：workflow 可執行 docker compose
       - /var/run/docker.sock:/var/run/docker.sock
-      # 宿主機路徑與容器內路徑對應一致，避免 DooD 掛載錯誤
-      - ${PIPELINE_ROOT:-/mnt/e/Code/github/automated-testing-pipeline}:${PIPELINE_ROOT:-/mnt/e/Code/github/automated-testing-pipeline}
+      # 掛整個 /mnt/e（或你所有客戶專案的根目錄），讓 n8n 能存取所有註冊的專案
+      # 容器內路徑 = 宿主路徑，避免 DooD 掛載錯誤
+      - /mnt/e:/mnt/e
     working_dir: ${PIPELINE_ROOT:-/mnt/e/Code/github/automated-testing-pipeline}
     profiles:
       - n8n
@@ -118,5 +122,6 @@ services:
       - all
 
 volumes:
+  # 不指定 name，讓 compose 沿用預設命名 `<project>_n8n_data`
+  # 即 `automated-testing-pipeline_n8n_data`，與既有 volume 匹配
   n8n_data:
-    name: testing-pipeline-n8n-data
