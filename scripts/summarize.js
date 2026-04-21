@@ -25,6 +25,34 @@ const exists = p => fs.existsSync(p);
 const read = p => fs.readFileSync(p, 'utf-8');
 const pad = (s, w) => String(s).padEnd(w);
 
+// ─── 執行歷史 (append-only jsonl) ───────────────────────────
+const HISTORY_FILE = path.join(REPORTS, 'run-history.jsonl');
+
+function readHistory() {
+  if (!exists(HISTORY_FILE)) return [];
+  return read(HISTORY_FILE).trim().split('\n').filter(Boolean)
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
+}
+function appendHistory(entry) {
+  fs.appendFileSync(HISTORY_FILE, JSON.stringify(entry) + '\n');
+}
+// 計算與上次差距；lowerIsBetter=true 代表數字越小越好（error 數等）
+function trend(cur, prev, lowerIsBetter = true) {
+  if (prev == null || cur == null) return '';
+  if (cur === prev) return '  [=]';
+  const d = cur - prev;
+  const good = lowerIsBetter ? d < 0 : d > 0;
+  const arrow = d > 0 ? '↑' : '↓';
+  const sign = d > 0 ? '+' : '';
+  return `  [${arrow}${sign}${d}${good ? ' 改善' : ' 惡化'}]`;
+}
+function trendStr(cur, prev) {
+  if (prev == null || cur == null) return '';
+  if (cur === prev) return '  [=]';
+  return `  [前次 ${prev} → 現在 ${cur}]`;
+}
+
 // ─── ① SSL：從最新的 testssl HTML 抓 grade / score ─────────
 function parseSSL() {
   const files = fs.readdirSync(REPORTS).filter(f => /^testssl-.*\.html$/.test(f)).sort();
@@ -99,6 +127,25 @@ const k = parseK6();
 const hasUnit = exists(path.join(REPORTS, 'phpunit.xml'));
 const hasE2E = exists(path.join(REPORTS, 'playwright'));
 
+// ─── 讀取上一次結果（用來顯示趨勢）──────────────────────────
+const history = readHistory();
+const prev = history.length ? history[history.length - 1] : null;
+
+// ─── 本次結果（寫入歷史用）────────────────────────────────
+const entry = {
+  ts: new Date().toISOString(),
+  ssl: s.status === 'no-report' ? null : { grade: s.grade, score: parseInt(s.score, 10) || null },
+  static: (ps.status) ? null : (ps.total ?? null),
+  zap: z.status === 'no-report' ? null : { H: z.High, M: z.Medium, L: z.Low, I: z.Informational },
+  k6: (k.status) ? null : {
+    p95: Math.round(k.p95Ms),
+    fail: +k.failedPct.toFixed(2),
+    reqs: k.totalReqs,
+  },
+  unit: hasUnit,
+  e2e: hasE2E,
+};
+
 const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
 const lines = [];
 lines.push('═══════════════════════════════════════════');
@@ -106,31 +153,61 @@ lines.push(`  ${project} 測試評分卡`);
 lines.push(`  ${now}`);
 lines.push('═══════════════════════════════════════════');
 lines.push('');
-lines.push(`① SSL/TLS (testssl.sh)     ${s.grade || 'N/A'}  (${s.score || 'N/A'}/100)`);
+const sslTrend = (prev?.ssl?.grade && s.grade)
+  ? (prev.ssl.grade === s.grade ? '  [=]' : `  [前次 ${prev.ssl.grade} → 現在 ${s.grade}]`) : '';
+lines.push(`① SSL/TLS (testssl.sh)     ${s.grade || 'N/A'}  (${s.score || 'N/A'}/100)${sslTrend}`);
 
 if (ps.status === 'no-report') {
   lines.push('② 靜態分析 (PHPStan)         (無報告)');
 } else if (ps.status === 'parse-error') {
   lines.push(`② 靜態分析 (PHPStan)         解析失敗：${ps.error}`);
 } else {
-  lines.push(`② 靜態分析 (PHPStan)         ${ps.total} 個錯誤`);
+  lines.push(`② 靜態分析 (PHPStan)         ${ps.total} 個錯誤${trend(ps.total, prev?.static)}`);
   for (const t of ps.top) {
     lines.push(`     ${pad(t.file, 35)} ${t.errors}`);
   }
 }
 
-lines.push(`③ 資安掃描 (OWASP ZAP)       High=${z.High}  Medium=${z.Medium}  Low=${z.Low}  Info=${z.Informational}`);
+const zapTotal = z.High + z.Medium + z.Low + z.Informational;
+const prevZapTotal = prev?.zap ? prev.zap.H + prev.zap.M + prev.zap.L + prev.zap.I : null;
+lines.push(`③ 資安掃描 (OWASP ZAP)       High=${z.High}  Medium=${z.Medium}  Low=${z.Low}  Info=${z.Informational}${trend(zapTotal, prevZapTotal)}`);
 
 if (k.status === 'no-report') {
   lines.push('④ 壓力測試 (k6)             (無報告)');
 } else {
-  lines.push(`④ 壓力測試 (k6)             req=${k.totalReqs}  avg=${Math.round(k.avgMs)}ms  p95=${Math.round(k.p95Ms)}ms  fail=${k.failedPct.toFixed(2)}%`);
+  const p95 = Math.round(k.p95Ms);
+  lines.push(`④ 壓力測試 (k6)             req=${k.totalReqs}  avg=${Math.round(k.avgMs)}ms  p95=${p95}ms  fail=${k.failedPct.toFixed(2)}%${trend(p95, prev?.k6?.p95)}`);
 }
 
 lines.push(`⑤ 單元測試 (PHPUnit)         ${hasUnit ? '有報告（JUnit XML）' : '未啟用'}`);
 lines.push(`⑥ E2E (Playwright)         ${hasE2E ? '有報告' : '未啟用'}`);
+
+// ─── 最近執行紀錄 ─────────────────────────────────────────
 lines.push('');
+lines.push('─── 最近執行紀錄（run-history.jsonl）───────────');
+const recent = history.slice(-4);  // 不含本次
+recent.push(entry);                 // 本次附在最後
+for (const e of recent) {
+  const t = new Date(e.ts).toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei', hour12: false,
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  }).replace(/,/, '');
+  const ssl = e.ssl?.grade ?? '—';
+  const st = e.static != null ? `${e.static}e` : '—';
+  const zap = e.zap ? `${e.zap.H}H/${e.zap.M}M/${e.zap.L}L` : '—';
+  const k6 = e.k6 ? `${e.k6.p95}ms` : '—';
+  const mark = e === entry ? '▶' : ' ';
+  lines.push(`  ${mark} ${t}  SSL=${ssl}  PHPStan=${st}  ZAP=${zap}  k6=${k6}`);
+}
+const historyCount = history.length + 1;
+lines.push('');
+lines.push(`累計 ${historyCount} 次執行（▶ 為本次）`);
 lines.push(`報告目錄：${REPORTS}/`);
+lines.push(`  • summary.md         — 本次評分卡`);
+lines.push(`  • run-history.jsonl  — 全部執行歷史（append-only）`);
+
+// ─── 寫入檔案 ─────────────────────────────────────────────
+appendHistory(entry);
 
 const out = lines.join('\n');
 fs.writeFileSync(path.join(REPORTS, 'summary.md'), out + '\n');
