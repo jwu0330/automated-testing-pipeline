@@ -495,22 +495,58 @@ docker network rm atp-test-net
 
 ## 7. 進階：透過 n8n GUI 排程
 
-`n8n/workflows/pipeline-skeleton.json` 匯入後的 workflow 有 10 個節點：
+`n8n/workflows/pipeline-skeleton.json` 匯入後的 workflow 採**三路並行架構**：
+
+### 整體流程圖
 
 ```
 Manual Trigger — 手動觸發
-  → Set Project Vars — 設定專案
-  → Run SSL Scan — SSL 憑證檢測
-  → Run Static Analysis — 靜態程式碼分析
-  → Run Security Scan — 弱點掃描
-  → Run Load Test — 壓力測試
-  → Run Unit Tests — 單元測試（auto-detect DB 整合測試）
-  → Run E2E Tests — 端對端測試
-  → Show Scorecard — 評分卡彙整（JSON 輸出）
-  → Parse Scorecard — 結構化評分（n8n Schema 可直接分欄顯示）
+  → 01 Init - Set Project Vars — 設定專案
+  → 02 Precheck - Health Check — URL 探測
+  
+  分成三條並行路線：
+
+【路線 A：本地端測試】      【路線 B：資安 & 壓力測試】  【路線 C：使用者層面測試】
+├─ A1 Static Analysis      ├─ B1 SSL Scan            ├─ C1 E2E Tests
+├─ A2 Unit Tests           ├─ B2 ZAP                 ├─ C2 Visual Comparison (空)
+├─ A3 API Validation (空)  ├─ B3 Nuclei              ├─ C3 Browser Compatibility (空)
+└─ A4 DB Validation (空)   ├─ B4 Trivy               ├─ C4 Lighthouse
+                           ├─ B5 Load Test           ├─ C5 Link Check
+                           └─ B6 Auth & Permission (空) └─ C6 Monkey Testing
+  
+  三路匯聚：
+  → Report - Generate Scorecard — 評分卡彙整（JSON 輸出）
+  → Report - Parse Results — 結構化評分（n8n Schema 可直接分欄顯示）
 ```
 
-要排程：`Manual Trigger` 換成 `Schedule Trigger`（n8n 內建）；要換專案：雙擊 `Set Project Vars` 改 `projectName`。
+### 三條路線說明
+
+| 路線 | 名稱 | 節點 | 特點 |
+|------|------|------|------|
+| **A** | 本地端測試 | A1–A4 | 針對原始碼與本地邏輯，無外網需求 |
+| **B** | 資安 & 壓力 | B1–B6 | 針對安全性與效能，遠端網路掃描 |
+| **C** | 使用者層面 | C1–C6 | 針對 UI 和用戶體驗，相容性與互動 |
+
+### 節點預留（"空"）
+
+以下節點標註為「(空)」，表示功能框架已預留，待實作：
+
+- **A3 API Validation (空)** — API 端點驗證（Postman/Newman 或 Playwright API Testing）
+- **A4 DB Validation (空)** — 資料庫驗證（Migration / Seed Validation）
+- **B6 Auth & Permission (空)** — 身分與權限驗證（Postman / Playwright）
+- **C2 Visual Comparison (空)** — 視覺迴歸測試（Playwright Visual Comparisons 或 BackstopJS）
+- **C3 Browser Compatibility (空)** — 瀏覽器相容性測試（Playwright Projects 或 BrowserStack）
+
+### 防禦機制
+
+- 所有節點設定 `onError: continueRegularOutput`（繼續執行下一步）
+- 前面步驟失敗**不會**阻擋後面路線（既有 `|| echo` 模式保留）
+- 三路獨立並行，任何一路失敗都不影響其他路線
+
+### 排程與專案切換
+
+要排程：`Manual Trigger` 換成 `Schedule Trigger`（n8n 內建）
+要換專案：雙擊 `01 Init - Set Project Vars` 修改 `projectName`
 
 匯入：
 
