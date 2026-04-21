@@ -1,11 +1,6 @@
 {
-  "updatedAt": "2026-04-21T04:42:17.913Z",
-  "createdAt": "2026-04-21T04:29:56.324Z",
-  "id": "oNnWI3Ohcxh0ptqX",
   "name": "Testing Pipeline — Run Project",
-  "description": null,
   "active": false,
-  "isArchived": false,
   "nodes": [
     {
       "parameters": {},
@@ -13,10 +8,7 @@
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [
-        240,
-        300
-      ]
+      "position": [240, 300]
     },
     {
       "parameters": {
@@ -36,10 +28,7 @@
       "name": "Set Project Vars",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [
-        480,
-        300
-      ],
+      "position": [480, 300],
       "notes": "設定要跑的專案名稱。\n雙擊修改為 babydodofun / 其他專案。"
     },
     {
@@ -50,10 +39,7 @@
       "name": "Run SSL",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        720,
-        300
-      ],
+      "position": [720, 300],
       "notes": "scope = ssl",
       "onError": "continueRegularOutput"
     },
@@ -65,10 +51,7 @@
       "name": "Run Static",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        960,
-        300
-      ],
+      "position": [960, 300],
       "notes": "scope = static",
       "onError": "continueRegularOutput"
     },
@@ -80,10 +63,7 @@
       "name": "Run Security",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        1200,
-        300
-      ],
+      "position": [1200, 300],
       "notes": "scope = security",
       "onError": "continueRegularOutput"
     },
@@ -95,10 +75,7 @@
       "name": "Run Stress",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        1440,
-        300
-      ],
+      "position": [1440, 300],
       "notes": "scope = stress",
       "onError": "continueRegularOutput"
     },
@@ -110,11 +87,8 @@
       "name": "Run Unit",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        1680,
-        300
-      ],
-      "notes": "scope = unit",
+      "position": [1680, 300],
+      "notes": "scope = unit\ntesting.yml 停用時會快速略過",
       "onError": "continueRegularOutput"
     },
     {
@@ -125,11 +99,8 @@
       "name": "Run E2E",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [
-        1920,
-        300
-      ],
-      "notes": "scope = e2e",
+      "position": [1920, 300],
+      "notes": "scope = e2e\ntesting.yml 停用時會快速略過",
       "onError": "continueRegularOutput"
     },
     {
@@ -146,147 +117,30 @@
         },
         "options": {}
       },
-      "id": "tp-00000000-0000-0000-0000-000000000008",
+      "id": "tp-00000000-0000-0000-0000-000000000009",
       "name": "Summary",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [
-        2160,
-        300
-      ],
-      "notes": "彙整 4 個測試的 exit code。\n非 0 表示該測試失敗。"
+      "position": [2160, 300],
+      "notes": "彙整 6 個測試的 exit code。\n非 0 表示該測試失敗。"
     }
   ],
   "connections": {
-    "Manual Trigger": {
-      "main": [
-        [
-          {
-            "node": "Set Project Vars",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Set Project Vars": {
-      "main": [
-        [
-          {
-            "node": "Run SSL",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run SSL": {
-      "main": [
-        [
-          {
-            "node": "Run Static",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run Static": {
-      "main": [
-        [
-          {
-            "node": "Run Security",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run Security": {
-      "main": [
-        [
-          {
-            "node": "Run Stress",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run Stress": {
-      "main": [
-        [
-          {
-            "node": "Run Unit",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run Unit": {
-      "main": [
-        [
-          {
-            "node": "Run E2E",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run E2E": {
-      "main": [
-        [
-          {
-            "node": "Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
+    "Manual Trigger":   { "main": [[{ "node": "Set Project Vars", "type": "main", "index": 0 }]] },
+    "Set Project Vars": { "main": [[{ "node": "Run SSL",          "type": "main", "index": 0 }]] },
+    "Run SSL":          { "main": [[{ "node": "Run Static",       "type": "main", "index": 0 }]] },
+    "Run Static":       { "main": [[{ "node": "Run Security",     "type": "main", "index": 0 }]] },
+    "Run Security":     { "main": [[{ "node": "Run Stress",       "type": "main", "index": 0 }]] },
+    "Run Stress":       { "main": [[{ "node": "Run Unit",         "type": "main", "index": 0 }]] },
+    "Run Unit":         { "main": [[{ "node": "Run E2E",          "type": "main", "index": 0 }]] },
+    "Run E2E":          { "main": [[{ "node": "Summary",          "type": "main", "index": 0 }]] }
   },
   "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate"
+    "executionOrder": "v1"
   },
   "staticData": null,
-  "meta": null,
   "pinData": {},
-  "versionId": "6cdc4441-2101-4dbe-9f04-1c9dd69a7fcc",
-  "activeVersionId": null,
-  "versionCounter": 4,
-  "triggerCount": 0,
   "tags": [
-    {
-      "updatedAt": "2026-04-21T04:28:56.587Z",
-      "createdAt": "2026-04-21T04:28:56.587Z",
-      "id": "UakUqI1ufZEVUJgE",
-      "name": "pipeline"
-    }
-  ],
-  "shared": [
-    {
-      "updatedAt": "2026-04-21T04:29:56.327Z",
-      "createdAt": "2026-04-21T04:29:56.327Z",
-      "role": "workflow:owner",
-      "workflowId": "oNnWI3Ohcxh0ptqX",
-      "projectId": "yJDrL21QtC2tQSm3",
-      "project": {
-        "updatedAt": "2026-04-21T03:51:55.798Z",
-        "createdAt": "2026-04-21T03:47:14.322Z",
-        "id": "yJDrL21QtC2tQSm3",
-        "name": "JIYING WU <wjy.3725.512@gmail.com>",
-        "type": "personal",
-        "icon": null,
-        "description": null,
-        "creatorId": "a3605552-0554-4c95-8fe8-8ebb943d787b"
-      }
-    }
-  ],
-  "versionMetadata": {
-    "name": null,
-    "description": null
-  }
+    { "name": "pipeline" }
+  ]
 }
