@@ -65,7 +65,7 @@ function parseSSL() {
   return { grade, score, file: files[files.length - 1] };
 }
 
-// ─── ② PHPStan：JSON totals + 錯誤最多的檔案 ────────────────
+// ─── ② PHPStan：JSON totals + 錯誤明細（含 line + message）──
 function parsePHPStan() {
   const p = path.join(REPORTS, 'phpstan.json');
   if (!exists(p) || fs.statSync(p).size === 0) return { status: 'no-report' };
@@ -73,12 +73,42 @@ function parsePHPStan() {
     const data = JSON.parse(read(p));
     const total = data.totals?.file_errors ?? 0;
     const files = Object.entries(data.files || {})
-      .map(([k, v]) => ({ file: path.basename(k), errors: v.errors ?? 0 }))
+      .map(([fullPath, v]) => ({
+        full_path: fullPath,
+        relative: fullPath.replace(/^\/project\//, ''),
+        file: path.basename(fullPath),
+        errors: v.errors ?? 0,
+        messages: (v.messages || []).map(m => ({
+          line: m.line ?? null,
+          message: m.message ?? '',
+        })),
+      }))
       .sort((a, b) => b.errors - a.errors);
-    return { total, top: files.slice(0, 5) };
+    return { total, files };
   } catch (e) {
     return { status: 'parse-error', error: e.message };
   }
+}
+
+// ─── 寫一份詳細 phpstan-errors.md（全部錯誤、便於當成 ticket 附件）───
+function writePHPStanDetail(ps) {
+  if (ps.status || !ps.files?.length) return null;
+  const lines = [];
+  lines.push(`# PHPStan 錯誤明細 — ${project}`);
+  lines.push('');
+  lines.push(`**總計：${ps.total} 個錯誤**（level 5）`);
+  lines.push('');
+  for (const f of ps.files) {
+    lines.push(`## ${f.relative} (${f.errors})`);
+    lines.push('');
+    for (const m of f.messages) {
+      lines.push(`- **L${m.line}** — ${m.message}`);
+    }
+    lines.push('');
+  }
+  const outPath = path.join(REPORTS, 'phpstan-errors.md');
+  fs.writeFileSync(outPath, lines.join('\n'));
+  return outPath;
 }
 
 // ─── ③ ZAP：從 HTML Summary of Alerts 區塊抓各風險等級筆數 ───
@@ -209,10 +239,25 @@ if (ps.status === 'no-report') {
   lines.push(`② 靜態分析 (PHPStan)         解析失敗：${ps.error}`);
 } else {
   lines.push(`② 靜態分析 (PHPStan)         ${ps.total} 個錯誤${trend(ps.total, prev?.static)}`);
-  for (const t of ps.top) {
-    lines.push(`     ${pad(t.file, 35)} ${t.errors}`);
+  // 依檔案統計（前 5）
+  for (const f of ps.files.slice(0, 5)) {
+    lines.push(`     ${pad(f.file, 35)} ${f.errors}`);
   }
+  // 前 10 條實際錯誤訊息
+  const topErrors = ps.files.flatMap(f => f.messages.map(m => ({ ...m, file: f.relative }))).slice(0, 10);
+  if (topErrors.length) {
+    lines.push('');
+    lines.push('     ── 前 10 條錯誤明細 ──');
+    for (const e of topErrors) {
+      const loc = `${e.file}:${e.line}`;
+      lines.push(`     ${pad(loc, 48)} ${e.message}`);
+    }
+  }
+  lines.push('     （全部錯誤見 phpstan-errors.md）');
 }
+
+// 寫詳細錯誤清單
+writePHPStanDetail(ps);
 
 const zapTotal = z.High + z.Medium + z.Low + z.Informational;
 const prevZapTotal = prev?.zap ? prev.zap.H + prev.zap.M + prev.zap.L + prev.zap.I : null;
@@ -290,7 +335,11 @@ if (asJson) {
     },
     static: ps.status ? { status: ps.status } : {
       errors: ps.total,
-      top_files: ps.top,
+      files: ps.files.map(f => ({
+        path: f.relative,
+        errors: f.errors,
+        messages: f.messages,
+      })),
     },
     zap: z.status === 'no-report' ? null : {
       high: z.High, medium: z.Medium, low: z.Low, info: z.Informational,
