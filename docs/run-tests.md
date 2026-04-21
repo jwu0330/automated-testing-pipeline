@@ -527,15 +527,22 @@ Manual Trigger — 手動觸發
 | **B** | 資安 & 壓力 | B1–B6 | 針對安全性與效能，遠端網路掃描 |
 | **C** | 使用者層面 | C1–C6 | 針對 UI 和用戶體驗，相容性與互動 |
 
-### 節點預留（"空"）
+### 節點預留（"空"）與工具選型
 
-以下節點標註為「(空)」，表示功能框架已預留，待實作：
+以下節點標註為「(空)」，表示功能框架已預留，待實作。已評選最適合的工具：
 
-- **A3 API Validation (空)** — API 端點驗證（Postman/Newman 或 Playwright API Testing）
-- **A4 DB Validation (空)** — 資料庫驗證（Migration / Seed Validation）
-- **B6 Auth & Permission (空)** — 身分與權限驗證（Postman / Playwright）
-- **C2 Visual Comparison (空)** — 視覺迴歸測試（Playwright Visual Comparisons 或 BackstopJS）
-- **C3 Browser Compatibility (空)** — 瀏覽器相容性測試（Playwright Projects 或 BrowserStack）
+| 節點 | 工具選擇 | 說明 |
+|------|---------|------|
+| **A3 API Validation (空)** | **Newman** (Postman CLI) | API 端點驗證；業界標準，支援複雜 auth/token、豐富報告 |
+| **A4 DB Validation (空)** | **自製 Migration + Seed 驗證** | 驗證 schema 版本一致性 + 初始資料完整；輕量無額外依賴 |
+| **B6 Auth & Permission (空)** | **Postman** (複用 API 集合) | 身分與權限驗證；複用 A3 的 API 集合新增權限 test case |
+| **C2 Visual Comparison (空)** | **Playwright Visual Comparisons** | 視覺迴歸測試；與現有 E2E 框架同堆疊，內建無額外工具 |
+| **C3 Browser Compatibility (空)** | **Playwright Projects** | 瀏覽器相容性測試；支援 chromium/firefox/webkit 多引擎本地驗證 |
+
+**選型原則**：
+- 最廣泛支援 × 最小依賴 × 已驗證可靠
+- 優先複用現有堆疊（Playwright）避免工具爆炸
+- API/Auth 合併為同一 Newman 集合，減少配置複雜度
 
 ### 防禦機制
 

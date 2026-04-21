@@ -173,7 +173,8 @@ bash scripts/run-project.sh <name> security   # 單一測試類型
 
 - **[`.testing/README.md`](./.testing/README.md)** ★ 新專案導入（必要 vs 可選、固定流程、一鍵指令）
 - [docs/project-convention.md](./docs/project-convention.md) — 專案測試規範（深入參考）
-- [docs/run-tests.md](./docs/run-tests.md) — 操作手冊
+- [docs/run-tests.md](./docs/run-tests.md) — 操作手冊 + n8n 工作流
+- [docs/architecture-parallel-reporting.md](./docs/architecture-parallel-reporting.md) ★ **新** — 三路並行設計、報告安全驗證、工具評選細節
 - [docs/setup.md](./docs/setup.md) — WSL/Docker 安裝
 
 ---
