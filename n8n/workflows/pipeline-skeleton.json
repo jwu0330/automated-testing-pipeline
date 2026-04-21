@@ -1,9 +1,15 @@
 {
+  "updatedAt": "2026-04-21T04:42:17.913Z",
+  "createdAt": "2026-04-21T04:29:56.324Z",
+  "id": "oNnWI3Ohcxh0ptqX",
   "name": "Testing Pipeline — Run Project",
+  "description": null,
+  "active": false,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {},
-      "id": "0a0a0a01-0000-0000-0000-000000000001",
+      "id": "tp-00000000-0000-0000-0000-000000000001",
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -17,73 +23,138 @@
         "assignments": {
           "assignments": [
             {
-              "id": "var-project",
+              "id": "v-proj",
               "name": "projectName",
               "value": "babydodofun",
-              "type": "string"
-            },
-            {
-              "id": "var-scope",
-              "name": "scope",
-              "value": "all",
               "type": "string"
             }
           ]
         },
         "options": {}
       },
-      "id": "0a0a0a01-0000-0000-0000-000000000002",
+      "id": "tp-00000000-0000-0000-0000-000000000002",
       "name": "Set Project Vars",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        460,
+        480,
         300
       ],
-      "notes": "可用的 scope：all | ssl | security | stress | static | unit | e2e"
+      "notes": "設定要跑的專案名稱。\n雙擊修改為 babydodofun / 其他專案。"
     },
     {
       "parameters": {
-        "command": "=bash scripts/run-project.sh {{ $json.projectName }} {{ $json.scope }}"
+        "command": "=bash scripts/run-project.sh {{ $json.projectName }} ssl"
       },
-      "id": "0a0a0a01-0000-0000-0000-000000000003",
-      "name": "Run Pipeline",
+      "id": "tp-00000000-0000-0000-0000-000000000003",
+      "name": "Run SSL",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        680,
+        720,
         300
       ],
-      "notes": "呼叫 run-project.sh。n8n 容器 working_dir 已設為 PIPELINE_ROOT，\n所以用相對路徑即可。"
+      "notes": "scope = ssl",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $json.projectName }} static"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000004",
+      "name": "Run Static",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        960,
+        300
+      ],
+      "notes": "scope = static",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $json.projectName }} security"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000005",
+      "name": "Run Security",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        300
+      ],
+      "notes": "scope = security",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $json.projectName }} stress"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000006",
+      "name": "Run Stress",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        300
+      ],
+      "notes": "scope = stress",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $json.projectName }} unit"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000007",
+      "name": "Run Unit",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        300
+      ],
+      "notes": "scope = unit",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "=bash scripts/run-project.sh {{ $json.projectName }} e2e"
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000008",
+      "name": "Run E2E",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        300
+      ],
+      "notes": "scope = e2e",
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
         "assignments": {
           "assignments": [
             {
-              "id": "out-stdout",
-              "name": "stdout",
-              "value": "={{ $json.stdout }}",
-              "type": "string"
-            },
-            {
-              "id": "out-exitCode",
-              "name": "exitCode",
-              "value": "={{ $json.exitCode }}",
-              "type": "number"
+              "id": "s-status",
+              "name": "summary",
+              "type": "string",
+              "value": "={{ 'SSL='      + $('Run SSL').first().json.exitCode + ' Static='   + $('Run Static').first().json.exitCode + ' Security=' + $('Run Security').first().json.exitCode + ' Stress='   + $('Run Stress').first().json.exitCode + ' Unit='     + $('Run Unit').first().json.exitCode + ' E2E='      + $('Run E2E').first().json.exitCode }}"
             }
           ]
         },
         "options": {}
       },
-      "id": "0a0a0a01-0000-0000-0000-000000000004",
-      "name": "Format Result",
+      "id": "tp-00000000-0000-0000-0000-000000000008",
+      "name": "Summary",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        900,
+        2160,
         300
-      ]
+      ],
+      "notes": "彙整 4 個測試的 exit code。\n非 0 表示該測試失敗。"
     }
   ],
   "connections": {
@@ -102,18 +173,73 @@
       "main": [
         [
           {
-            "node": "Run Pipeline",
+            "node": "Run SSL",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Run Pipeline": {
+    "Run SSL": {
       "main": [
         [
           {
-            "node": "Format Result",
+            "node": "Run Static",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Static": {
+      "main": [
+        [
+          {
+            "node": "Run Security",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Security": {
+      "main": [
+        [
+          {
+            "node": "Run Stress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Stress": {
+      "main": [
+        [
+          {
+            "node": "Run Unit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Unit": {
+      "main": [
+        [
+          {
+            "node": "Run E2E",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run E2E": {
+      "main": [
+        [
+          {
+            "node": "Summary",
             "type": "main",
             "index": 0
           }
@@ -122,15 +248,45 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   },
   "staticData": null,
+  "meta": null,
   "pinData": {},
-  "versionId": "0.2.0",
+  "versionId": "6cdc4441-2101-4dbe-9f04-1c9dd69a7fcc",
+  "activeVersionId": null,
+  "versionCounter": 4,
   "triggerCount": 0,
   "tags": [
     {
+      "updatedAt": "2026-04-21T04:28:56.587Z",
+      "createdAt": "2026-04-21T04:28:56.587Z",
+      "id": "UakUqI1ufZEVUJgE",
       "name": "pipeline"
     }
-  ]
+  ],
+  "shared": [
+    {
+      "updatedAt": "2026-04-21T04:29:56.327Z",
+      "createdAt": "2026-04-21T04:29:56.327Z",
+      "role": "workflow:owner",
+      "workflowId": "oNnWI3Ohcxh0ptqX",
+      "projectId": "yJDrL21QtC2tQSm3",
+      "project": {
+        "updatedAt": "2026-04-21T03:51:55.798Z",
+        "createdAt": "2026-04-21T03:47:14.322Z",
+        "id": "yJDrL21QtC2tQSm3",
+        "name": "JIYING WU <wjy.3725.512@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "a3605552-0554-4c95-8fe8-8ebb943d787b"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
 }
