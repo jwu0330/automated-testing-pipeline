@@ -44,7 +44,7 @@
     },
     {
       "parameters": {
-        "command": "=bash /workspace/scripts/run-project.sh {{ $json.projectName }} {{ $json.scope }}"
+        "command": "=bash scripts/run-project.sh {{ $json.projectName }} {{ $json.scope }}"
       },
       "id": "0a0a0a01-0000-0000-0000-000000000003",
       "name": "Run Pipeline",
@@ -54,7 +54,7 @@
         680,
         300
       ],
-      "notes": "呼叫 run-project.sh。需要 n8n 容器已掛載 docker socket 與 workspace。"
+      "notes": "呼叫 run-project.sh。n8n 容器 working_dir 已設為 PIPELINE_ROOT，\n所以用相對路徑即可。"
     },
     {
       "parameters": {
