@@ -131,7 +131,7 @@
       "parameters": {
         "command": "=bash scripts/run-project.sh {{ $('Set Project Vars — 設定專案').first().json.projectName }} summary"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000008",
+      "id": "tp-00000000-0000-0000-0000-000000000009",
       "name": "Show Scorecard — 評分卡彙整",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
