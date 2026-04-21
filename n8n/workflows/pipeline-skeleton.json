@@ -136,7 +136,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        2640,
+        2900,
         300
       ],
       "notes": "呼叫 summarize.js 讀取 reports/<project>/ 的\n所有報告，輸出人類可讀的評分卡",
