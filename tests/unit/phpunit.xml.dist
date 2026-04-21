@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    PHPUnit 通用範本
+
+    本檔案是流水線提供的「模板」，不會直接執行。
+    各專案必須在 <project>/.testing/unit/phpunit.xml 自行建立。
+    建議複製本檔為起點。
+
+    參考：https://docs.phpunit.de/en/10.5/configuration.html
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+         bootstrap="bootstrap.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+         executionOrder="random"
+         failOnWarning="true"
+         failOnRisky="true">
+
+    <testsuites>
+        <testsuite name="default">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory>../../htdocs</directory>
+            <directory>../../includes</directory>
+        </include>
+        <exclude>
+            <directory>../../vendor</directory>
+            <directory>../../node_modules</directory>
+        </exclude>
+    </source>
+
+    <php>
+        <env name="APP_ENV" value="testing"/>
+    </php>
+</phpunit>

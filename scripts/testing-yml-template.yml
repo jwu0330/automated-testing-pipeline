@@ -1,0 +1,72 @@
+# ════════════════════════════════════════════════════════════════
+# testing.yml — 專案測試設定範本
+#
+# 使用方式：
+#   cp scripts/testing-yml-template.yml <your-project>/.testing/testing.yml
+#   然後編輯 .testing/testing.yml 填入實際值
+#
+# 版本：schema_version = 1
+# 規範：see docs/project-convention.md
+# ════════════════════════════════════════════════════════════════
+schema_version: 1
+
+# ─── 專案識別 ───────────────────────────────────────────────────
+project:
+  name: example_project              # 必填：唯一名稱（英數、底線）
+  display_name: Example Project      # 選填：顯示用名稱
+  target_url: https://example.com    # 必填：遠端測試目標 URL
+  stack:
+    language: php                    # php | node | python
+    php_version: "8.1"               # 若 language=php 時填寫
+    database: mysql                  # mysql | mariadb | postgres | none
+    hosting: pseudo                  # pseudo(遠振) | aws | local
+  tags: []                           # 自由標籤，例如 [iot, admin-panel, ecommerce]
+
+# ─── 原始碼位置（相對於 .testing/）─────────────────────────────
+source:
+  root: "../"                        # 預設：專案根目錄
+  paths_to_scan:                     # 靜態分析要掃描的路徑
+    - htdocs
+    - includes
+  exclude:                           # 排除目錄
+    - vendor
+    - node_modules
+    - .git
+    - .testing/fixtures
+
+# ─── 測試開關與設定 ────────────────────────────────────────────
+tests:
+  # ─── 通用測試（流水線提供） ───
+  ssl:
+    enabled: true
+    # testssl.sh 不需要額外設定
+
+  security:
+    enabled: true
+    level: WARN                      # WARN | INFO | FAIL
+
+  stress:
+    enabled: true
+    vus: 10                          # 虛擬使用者數（遠振共享主機建議 ≤ 10）
+    duration: 30s                    # 測試時長
+    pages:                           # 要測試的頁面（相對 target_url）
+      - /
+      - /login.html
+
+  static:
+    enabled: true
+    level: 5                         # PHPStan level 0-9
+    config: null                     # 選填：.testing/static/phpstan.neon（客製覆寫）
+
+  # ─── 客製測試（專案開發者撰寫） ───
+  unit:
+    enabled: false                   # 啟用前需要 .testing/unit/phpunit.xml
+    phpunit_config: unit/phpunit.xml
+
+  e2e:
+    enabled: false                   # 啟用前需要 .testing/e2e/package.json
+    specs: e2e/tests/
+    auth:
+      enabled: false                 # 登入流程需要時才開
+      username_env: E2E_USERNAME     # 從 .env 讀取，不要寫死帳密
+      password_env: E2E_PASSWORD

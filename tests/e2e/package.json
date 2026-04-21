@@ -1,0 +1,15 @@
+{
+  "name": "automated-testing-pipeline-e2e",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Generic Playwright E2E skeleton. Copy to <project>/.testing/e2e/ and customize.",
+  "scripts": {
+    "test": "playwright test",
+    "test:smoke": "playwright test tests/smoke.spec.ts",
+    "test:ui": "playwright test --ui",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

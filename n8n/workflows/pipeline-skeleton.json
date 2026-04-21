@@ -1,0 +1,136 @@
+{
+  "name": "Testing Pipeline — Run Project",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "0a0a0a01-0000-0000-0000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "var-project",
+              "name": "projectName",
+              "value": "babydodofun",
+              "type": "string"
+            },
+            {
+              "id": "var-scope",
+              "name": "scope",
+              "value": "all",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0a0a0a01-0000-0000-0000-000000000002",
+      "name": "Set Project Vars",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ],
+      "notes": "可用的 scope：all | ssl | security | stress | static | unit | e2e"
+    },
+    {
+      "parameters": {
+        "command": "=bash /workspace/scripts/run-project.sh {{ $json.projectName }} {{ $json.scope }}"
+      },
+      "id": "0a0a0a01-0000-0000-0000-000000000003",
+      "name": "Run Pipeline",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "notes": "呼叫 run-project.sh。需要 n8n 容器已掛載 docker socket 與 workspace。"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "out-stdout",
+              "name": "stdout",
+              "value": "={{ $json.stdout }}",
+              "type": "string"
+            },
+            {
+              "id": "out-exitCode",
+              "name": "exitCode",
+              "value": "={{ $json.exitCode }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0a0a0a01-0000-0000-0000-000000000004",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Project Vars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Project Vars": {
+      "main": [
+        [
+          {
+            "node": "Run Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Format Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "0.2.0",
+  "triggerCount": 0,
+  "tags": [
+    {
+      "name": "pipeline"
+    }
+  ]
+}

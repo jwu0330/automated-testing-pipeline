@@ -1,0 +1,13 @@
+# ════════════════════════════════════════════════════════════════
+# 專案註冊表（範本）
+# 複製為 projects.registry.yml 後使用；正式檔不納入 Git
+#
+# 推薦用 scripts/register-project.sh 自動維護，不要手動編輯。
+# ════════════════════════════════════════════════════════════════
+schema_version: 1
+
+projects:
+  # babydodofun:
+  #   path: /mnt/e/cwe網站/b12/babydodofun
+  #   registered_at: "2026-04-21T00:00:00+08:00"
+  #   description: 主要測試目標

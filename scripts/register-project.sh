@@ -1,0 +1,72 @@
+#!/bin/bash
+# ════════════════════════════════════════════════════════════════
+# register-project.sh — 註冊新專案到測試流水線
+#
+# 用法：
+#   bash scripts/register-project.sh <name> <absolute-path>
+#
+# 範例：
+#   bash scripts/register-project.sh babydodofun /mnt/e/cwe網站/b12/babydodofun
+# ════════════════════════════════════════════════════════════════
+set -euo pipefail
+
+NAME="${1:-}"
+PROJECT_PATH="${2:-}"
+
+if [ -z "$NAME" ] || [ -z "$PROJECT_PATH" ]; then
+    echo "用法：bash scripts/register-project.sh <name> <absolute-path>"
+    echo "範例：bash scripts/register-project.sh babydodofun /mnt/e/cwe網站/b12/babydodofun"
+    exit 1
+fi
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REGISTRY="$ROOT/projects.registry.yml"
+
+# ─── 驗證專案路徑 ───
+if [ ! -d "$PROJECT_PATH" ]; then
+    echo "❌ 路徑不存在：$PROJECT_PATH"
+    exit 1
+fi
+
+if [ ! -d "$PROJECT_PATH/.testing" ]; then
+    echo "⚠️  警告：$PROJECT_PATH/.testing 不存在"
+    echo "    請依 docs/project-convention.md 建立 .testing/ 資料夾"
+    echo ""
+fi
+
+if [ ! -f "$PROJECT_PATH/.testing/testing.yml" ]; then
+    echo "⚠️  警告：$PROJECT_PATH/.testing/testing.yml 不存在"
+    echo "    請先從範本建立："
+    echo "      mkdir -p \"$PROJECT_PATH/.testing\""
+    echo "      cp $ROOT/scripts/testing-yml-template.yml \"$PROJECT_PATH/.testing/testing.yml\""
+    echo ""
+fi
+
+# ─── 檢查 yq ───
+if ! command -v yq &> /dev/null; then
+    echo "❌ 需要安裝 yq（Go 版）："
+    echo "   sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
+    echo "   sudo chmod +x /usr/local/bin/yq"
+    exit 1
+fi
+
+# ─── 初始化 registry ───
+if [ ! -f "$REGISTRY" ]; then
+    cat > "$REGISTRY" <<EOF
+schema_version: 1
+projects: {}
+EOF
+    echo "✓ 建立 $REGISTRY"
+fi
+
+# ─── 寫入 registry ───
+yq -i ".projects.${NAME}.path = \"${PROJECT_PATH}\"" "$REGISTRY"
+yq -i ".projects.${NAME}.registered_at = \"$(date -Iseconds)\"" "$REGISTRY"
+
+echo ""
+echo "✅ 已註冊：$NAME"
+echo "   Path:         $PROJECT_PATH"
+echo "   Registry:     $REGISTRY"
+echo ""
+echo "下一步："
+echo "   bash scripts/run-project.sh $NAME"

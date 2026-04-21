@@ -56,18 +56,60 @@ services:
       - all
 
   # ─────────────────────────────────────
-  # E2E 測試 (Playwright)
+  # E2E 測試 (Playwright) — 通用骨架
+  # 註：專案客製的 E2E 由 scripts/run-project.sh 直接 docker run 執行，
+  #     本 service 僅用於流水線骨架本身的驗證。
   # ─────────────────────────────────────
   playwright:
     image: mcr.microsoft.com/playwright:v1.52.0-noble
     container_name: playwright-runner
     volumes:
       - ./tests/e2e:/workspace
-      - ./reports:/workspace/reports
+      - ./reports:/reports
     env_file:
       - .env
     working_dir: /workspace
-    entrypoint: ["npx", "playwright", "test"]
+    entrypoint: ["sh", "-c", "npm ci --no-audit --no-fund && npx playwright test"]
     profiles:
       - e2e
       - all
+
+  # ─────────────────────────────────────
+  # 工作流程編排 (n8n) — 測試總管理者
+  # 啟動：docker compose --profile n8n up -d
+  # 訪問：http://localhost:${N8N_PORT:-5678}
+  # ─────────────────────────────────────
+  n8n:
+    build:
+      context: ./n8n
+      dockerfile: Dockerfile
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-change-me}
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - WEBHOOK_URL=http://localhost:${N8N_PORT:-5678}/
+      - GENERIC_TIMEZONE=Asia/Taipei
+      - TZ=Asia/Taipei
+      - N8N_SECURE_COOKIE=false
+      - N8N_RUNNERS_ENABLED=true
+    volumes:
+      - n8n_data:/home/node/.n8n
+      # Docker-outside-of-Docker：workflow 可執行 docker compose
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 宿主機路徑與容器內路徑對應一致，避免 DooD 掛載錯誤
+      - ${PIPELINE_ROOT:-/mnt/e/Code/github/automated-testing-pipeline}:${PIPELINE_ROOT:-/mnt/e/Code/github/automated-testing-pipeline}
+    working_dir: ${PIPELINE_ROOT:-/mnt/e/Code/github/automated-testing-pipeline}
+    profiles:
+      - n8n
+      - orchestrator
+      - all
+
+volumes:
+  n8n_data:
+    name: testing-pipeline-n8n-data

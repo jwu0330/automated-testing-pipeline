@@ -4,6 +4,15 @@ reports/
 # 環境變數（含敏感資訊）
 .env
 
+# 專案註冊表（含機器上的絕對路徑）
+projects.registry.yml
+
+# E2E 執行產物
+tests/e2e/node_modules/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/playwright/.cache/
+
 # OS
 .DS_Store
 Thumbs.db

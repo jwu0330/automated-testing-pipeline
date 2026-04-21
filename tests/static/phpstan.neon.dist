@@ -1,0 +1,43 @@
+# ════════════════════════════════════════════════════════════════
+# PHPStan 通用設定（流水線預設）
+#
+# 當專案 .testing/static/phpstan.neon 不存在時，run-project.sh
+# 會使用本檔案做為靜態分析設定。
+#
+# 欲覆寫規則：在各專案建立 .testing/static/phpstan.neon
+# 參考：https://phpstan.org/config-reference
+# ════════════════════════════════════════════════════════════════
+parameters:
+    # level 會由 run-project.sh 依 testing.yml 的 tests.static.level 覆寫
+    level: 5
+
+    # run-project.sh 會以 `docker run -v <project>:/project:ro -w /project` 掛入
+    # 這裡採用相對路徑，讓各專案依 testing.yml 的 source.paths_to_scan 掃描
+    paths:
+        - /project
+
+    excludePaths:
+        analyseAndScan:
+            - /project/vendor
+            - /project/node_modules
+            - /project/.git
+            - /project/.testing
+            - /project/tests
+            - /project/reports
+
+    # 遠振共享主機常見：PHP 7.4+ / 8.x 混用
+    phpVersion: 80100
+
+    # 忽略常見誤報
+    ignoreErrors:
+        # 動態屬性（WordPress/CodeIgniter/共用主機常見）
+        - '#Access to an undefined property.*#'
+        # include/require 的變數檔名
+        - '#Function.*include.*#'
+
+    # 平行處理
+    parallel:
+        maximumNumberOfProcesses: 4
+
+    # 報告格式由 run-project.sh 以 --error-format=json 指定
+    reportUnmatchedIgnoredErrors: false
