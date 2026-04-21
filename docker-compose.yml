@@ -12,6 +12,9 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - .env
+    environment:
+      # 讓 run-project.sh export 的 shell 變數覆寫 .env 預設值
+      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
     entrypoint: ["/bin/bash", "/workspace/tests/run-testssl.sh"]
     profiles:
       - ssl
@@ -47,6 +50,10 @@ services:
       - ./reports:/reports
     env_file:
       - .env
+    environment:
+      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - K6_VUS=${K6_VUS:-10}
+      - K6_DURATION=${K6_DURATION:-30s}
     command: >
       run /scripts/load-test.js
         --out json=/reports/k6-results.json

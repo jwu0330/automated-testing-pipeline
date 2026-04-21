@@ -42,6 +42,14 @@ if [ ! -f "$PROJECT_PATH/.testing/testing.yml" ]; then
     echo ""
 fi
 
+if [ ! -f "$PROJECT_PATH/.testing/.env.example" ]; then
+    echo "💡 提示：尚無 .testing/.env.example（env 協議）"
+    echo "    若需要登入測試或其他敏感變數，請複製範本："
+    echo "      cp $ROOT/scripts/env.example \"$PROJECT_PATH/.testing/.env.example\""
+    echo "      cp \"$PROJECT_PATH/.testing/.env.example\" \"$PROJECT_PATH/.testing/.env\""
+    echo ""
+fi
+
 # ─── 檢查 yq ───
 if ! command -v yq &> /dev/null; then
     echo "❌ 需要安裝 yq（Go 版）："

@@ -85,6 +85,41 @@ tests:
 
 ---
 
+## 3.5 env 協議（敏感變數）
+
+**設計原則**：`testing.yml` 只放「**非敏感**」設定（可 git 公開），敏感變數（帳密、API Key）放在 `.env`。
+
+### 檔案分層
+
+| 位置 | 存放 | 是否 git | 誰維護 |
+|------|------|:---:|------|
+| 流水線 `.env` | 基礎設施（N8N_PASSWORD、PIPELINE_ROOT） | ❌ | 流水線使用者 |
+| `<project>/.testing/testing.yml` | 非敏感設定（URL、測試開關） | ✅ | 專案開發者 |
+| `<project>/.testing/.env.example` | 「需要哪些敏感變數」的範本 | ✅ | 專案開發者 |
+| `<project>/.testing/.env` | 實際填好的敏感值 | ❌（專案需 gitignore）| 本機填入 |
+
+### 呼叫流程（protocol）
+
+1. 流水線發佈範本：[scripts/env.example](../scripts/env.example)
+2. 新專案複製範本：
+   ```bash
+   cp scripts/env.example <project>/.testing/.env.example        # 納入 git
+   cp <project>/.testing/.env.example <project>/.testing/.env    # gitignore
+   # 編輯 .env 填入實際值
+   ```
+3. 執行 `bash scripts/run-project.sh <name>` 時，流水線會：
+   - 自動 `source <project>/.testing/.env`
+   - 透過 shell env 注入所有 docker compose 服務（已在 compose 裡用 `${VAR}` 聲明）
+   - 對 `docker run` 型服務加上 `--env-file=<project>/.testing/.env`
+
+### 為什麼這樣設計
+
+- **規範面**：`.env.example` 是專案對流水線的「合約」——告訴流水線這個專案會用哪些變數
+- **安全面**：`.env` 永遠不進 git，即使多人協作帳密也不外流
+- **擴充面**：專案可在自己的 `.env` 裡自由新增 `API_KEY`、`DB_PASSWORD` 等，流水線會全部注入容器
+
+---
+
 ## 4. 通用 vs 客製測試分工
 
 | 測試 | 類型 | 提供者 | 客製方式 |

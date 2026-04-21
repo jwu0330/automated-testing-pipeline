@@ -56,6 +56,21 @@ TARGET_URL=$(yq -r '.project.target_url' "$TESTING_YML")
 export TARGET_URL
 export PROJECT_NAME="$NAME"
 
+# ─── 載入專案敏感變數（env 協議）───
+# 規範：各客戶專案在 .testing/.env 提供敏感資訊（gitignore）
+# 流水線會 source 後透過 shell env 傳遞給 docker compose 與 docker run
+PROJECT_ENV="$PROJECT_PATH/.testing/.env"
+if [ -f "$PROJECT_ENV" ]; then
+    echo "  ✓ 載入專案 env：$PROJECT_ENV"
+    set -a
+    # shellcheck disable=SC1090
+    source "$PROJECT_ENV"
+    set +a
+elif [ -f "$PROJECT_PATH/.testing/.env.example" ]; then
+    echo "  ⚠️  .testing/.env 不存在（有 .env.example 範本）"
+    echo "      如需登入/敏感變數，請先：cp \"$PROJECT_PATH/.testing/.env.example\" \"$PROJECT_PATH/.testing/.env\" 並填值"
+fi
+
 REPORTS_DIR="$ROOT/reports/$NAME"
 mkdir -p "$REPORTS_DIR"
 
@@ -129,7 +144,9 @@ run_static() {
     else
         echo "  使用流水線預設設定：$config"
     fi
-    docker run --rm \
+    local env_args=()
+    [ -f "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+    docker run --rm "${env_args[@]}" \
         -v "$PROJECT_PATH:/project:ro" \
         -v "$config:/phpstan.neon:ro" \
         -v "$REPORTS_DIR:/reports" \
@@ -156,7 +173,9 @@ run_unit() {
     echo "──────────────────────────────────────────"
     local php_ver
     php_ver=$(yq -r '.project.stack.php_version // "8.1"' "$TESTING_YML")
-    docker run --rm \
+    local env_args=()
+    [ -f "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+    docker run --rm "${env_args[@]}" \
         -v "$PROJECT_PATH:/project" \
         -v "$REPORTS_DIR:/reports" \
         -w /project/.testing/unit \
@@ -181,10 +200,10 @@ run_e2e() {
     echo ""
     echo "▶ E2E 測試 (Playwright)"
     echo "──────────────────────────────────────────"
-    docker run --rm \
+    local env_args=()
+    [ -f "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+    docker run --rm "${env_args[@]}" \
         -e TARGET_URL="$TARGET_URL" \
-        -e E2E_USERNAME="${E2E_USERNAME:-}" \
-        -e E2E_PASSWORD="${E2E_PASSWORD:-}" \
         -v "$PROJECT_PATH/.testing/e2e:/e2e" \
         -v "$REPORTS_DIR:/reports" \
         -w /e2e \
