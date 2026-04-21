@@ -5,10 +5,13 @@
     {
       "parameters": {},
       "id": "tp-00000000-0000-0000-0000-000000000001",
-      "name": "Manual Trigger",
+      "name": "Manual Trigger — 手動觸發",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
@@ -25,10 +28,13 @@
         "options": {}
       },
       "id": "tp-00000000-0000-0000-0000-000000000002",
-      "name": "Set Project Vars",
+      "name": "Set Project Vars — 設定專案",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [480, 300],
+      "position": [
+        520,
+        300
+      ],
       "notes": "設定要跑的專案名稱。\n雙擊修改為 babydodofun / 其他專案。"
     },
     {
@@ -36,111 +42,207 @@
         "command": "=bash scripts/run-project.sh {{ $json.projectName }} ssl"
       },
       "id": "tp-00000000-0000-0000-0000-000000000003",
-      "name": "Run SSL",
+      "name": "Run SSL Scan — SSL 憑證檢測",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [720, 300],
-      "notes": "scope = ssl",
-      "onError": "continueRegularOutput"
+      "position": [
+        820,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "scope = ssl"
     },
     {
       "parameters": {
         "command": "=bash scripts/run-project.sh {{ $json.projectName }} static"
       },
       "id": "tp-00000000-0000-0000-0000-000000000004",
-      "name": "Run Static",
+      "name": "Run Static Analysis — 靜態程式碼分析",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [960, 300],
-      "notes": "scope = static",
-      "onError": "continueRegularOutput"
+      "position": [
+        1140,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "scope = static"
     },
     {
       "parameters": {
         "command": "=bash scripts/run-project.sh {{ $json.projectName }} security"
       },
       "id": "tp-00000000-0000-0000-0000-000000000005",
-      "name": "Run Security",
+      "name": "Run Security Scan — 弱點掃描",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [1200, 300],
-      "notes": "scope = security",
-      "onError": "continueRegularOutput"
+      "position": [
+        1440,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "scope = security"
     },
     {
       "parameters": {
         "command": "=bash scripts/run-project.sh {{ $json.projectName }} stress"
       },
       "id": "tp-00000000-0000-0000-0000-000000000006",
-      "name": "Run Stress",
+      "name": "Run Load Test — 壓力測試",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [1440, 300],
-      "notes": "scope = stress",
-      "onError": "continueRegularOutput"
+      "position": [
+        1720,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "scope = stress"
     },
     {
       "parameters": {
         "command": "=bash scripts/run-project.sh {{ $json.projectName }} unit"
       },
       "id": "tp-00000000-0000-0000-0000-000000000007",
-      "name": "Run Unit",
+      "name": "Run Unit Tests — 單元測試",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [1680, 300],
-      "notes": "scope = unit\ntesting.yml 停用時會快速略過",
-      "onError": "continueRegularOutput"
+      "position": [
+        2020,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "scope = unit"
     },
     {
       "parameters": {
         "command": "=bash scripts/run-project.sh {{ $json.projectName }} e2e"
       },
       "id": "tp-00000000-0000-0000-0000-000000000008",
-      "name": "Run E2E",
+      "name": "Run E2E Tests — 端對端測試",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [1920, 300],
-      "notes": "scope = e2e\ntesting.yml 停用時會快速略過",
-      "onError": "continueRegularOutput"
+      "position": [
+        2320,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "scope = e2e"
     },
     {
       "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "s-status",
-              "name": "summary",
-              "type": "string",
-              "value": "={{ 'SSL='      + $('Run SSL').first().json.exitCode + ' Static='   + $('Run Static').first().json.exitCode + ' Security=' + $('Run Security').first().json.exitCode + ' Stress='   + $('Run Stress').first().json.exitCode + ' Unit='     + $('Run Unit').first().json.exitCode + ' E2E='      + $('Run E2E').first().json.exitCode }}"
-            }
-          ]
-        },
-        "options": {}
+        "command": "=bash scripts/run-project.sh {{ $json.projectName || \"babydodofun\" }} summary"
       },
-      "id": "tp-00000000-0000-0000-0000-000000000009",
-      "name": "Summary",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [2160, 300],
-      "notes": "彙整 6 個測試的 exit code。\n非 0 表示該測試失敗。"
+      "id": "tp-00000000-0000-0000-0000-000000000008",
+      "name": "Show Scorecard — 評分卡彙整",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        300
+      ],
+      "notes": "呼叫 summarize.js 讀取 reports/<project>/ 的\n所有報告，輸出人類可讀的評分卡",
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
-    "Manual Trigger":   { "main": [[{ "node": "Set Project Vars", "type": "main", "index": 0 }]] },
-    "Set Project Vars": { "main": [[{ "node": "Run SSL",          "type": "main", "index": 0 }]] },
-    "Run SSL":          { "main": [[{ "node": "Run Static",       "type": "main", "index": 0 }]] },
-    "Run Static":       { "main": [[{ "node": "Run Security",     "type": "main", "index": 0 }]] },
-    "Run Security":     { "main": [[{ "node": "Run Stress",       "type": "main", "index": 0 }]] },
-    "Run Stress":       { "main": [[{ "node": "Run Unit",         "type": "main", "index": 0 }]] },
-    "Run Unit":         { "main": [[{ "node": "Run E2E",          "type": "main", "index": 0 }]] },
-    "Run E2E":          { "main": [[{ "node": "Summary",          "type": "main", "index": 0 }]] }
+    "Manual Trigger — 手動觸發": {
+      "main": [
+        [
+          {
+            "node": "Set Project Vars — 設定專案",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Project Vars — 設定專案": {
+      "main": [
+        [
+          {
+            "node": "Run SSL Scan — SSL 憑證檢測",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run SSL Scan — SSL 憑證檢測": {
+      "main": [
+        [
+          {
+            "node": "Run Static Analysis — 靜態程式碼分析",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Static Analysis — 靜態程式碼分析": {
+      "main": [
+        [
+          {
+            "node": "Run Security Scan — 弱點掃描",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Security Scan — 弱點掃描": {
+      "main": [
+        [
+          {
+            "node": "Run Load Test — 壓力測試",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Load Test — 壓力測試": {
+      "main": [
+        [
+          {
+            "node": "Run Unit Tests — 單元測試",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Unit Tests — 單元測試": {
+      "main": [
+        [
+          {
+            "node": "Run E2E Tests — 端對端測試",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run E2E Tests — 端對端測試": {
+      "main": [
+        [
+          {
+            "node": "Show Scorecard — 評分卡彙整",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   },
   "staticData": null,
   "pinData": {},
+  "triggerCount": 0,
   "tags": [
-    { "name": "pipeline" }
+    {
+      "name": "pipeline"
+    }
   ]
 }

@@ -213,6 +213,15 @@ run_e2e() {
         sh -c 'npm ci --no-audit --no-fund && npx playwright test --reporter=html,list'
 }
 
+# ─── 測試 7：產生評分卡 ───
+# 讀取 reports/<project>/ 內現有的各測試報告，產出人類可讀的 summary
+run_summary() {
+    echo ""
+    echo "▶ 產生評分卡 (summarize.js)"
+    echo "──────────────────────────────────────────"
+    node "$ROOT/scripts/summarize.js" "$NAME"
+}
+
 # ─── Dispatch ───
 case "$SCOPE" in
     all)
@@ -222,6 +231,7 @@ case "$SCOPE" in
         run_stress
         run_unit
         run_e2e
+        run_summary
         ;;
     ssl)      run_ssl ;;
     security) run_security ;;
@@ -229,9 +239,10 @@ case "$SCOPE" in
     static)   run_static ;;
     unit)     run_unit ;;
     e2e)      run_e2e ;;
+    summary)  run_summary ;;
     *)
         echo "❌ 未知測試類型：$SCOPE"
-        echo "   可用：all | ssl | security | stress | static | unit | e2e"
+        echo "   可用：all | ssl | security | stress | static | unit | e2e | summary"
         exit 1
         ;;
 esac
