@@ -1,0 +1,16 @@
+# 測試報告（每次執行重新產生）
+reports/
+
+# 環境變數（含敏感資訊）
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+docker-compose.override.yml

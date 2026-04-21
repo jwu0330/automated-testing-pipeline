@@ -1,0 +1,73 @@
+services:
+  # ─────────────────────────────────────
+  # SSL/TLS 檢測
+  # ─────────────────────────────────────
+  testssl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: testssl-runner
+    volumes:
+      - ./tests/ssl:/workspace/tests
+      - ./reports:/workspace/reports
+    env_file:
+      - .env
+    entrypoint: ["/bin/bash", "/workspace/tests/run-testssl.sh"]
+    profiles:
+      - ssl
+      - all
+
+  # ─────────────────────────────────────
+  # 資安掃描 (OWASP ZAP)
+  # ─────────────────────────────────────
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: zap-scanner
+    volumes:
+      - ./reports:/zap/wrk
+    env_file:
+      - .env
+    command: >
+      zap-baseline.py
+        -t ${TARGET_URL:-https://xcity.babydodofun.com}
+        -r zap-report.html
+        -l WARN
+    profiles:
+      - security
+      - all
+
+  # ─────────────────────────────────────
+  # 壓力測試 (k6)
+  # ─────────────────────────────────────
+  k6:
+    image: grafana/k6:latest
+    container_name: k6-runner
+    volumes:
+      - ./tests/stress:/scripts
+      - ./reports:/reports
+    env_file:
+      - .env
+    command: >
+      run /scripts/load-test.js
+        --out json=/reports/k6-results.json
+        --summary-export=/reports/k6-summary.json
+    profiles:
+      - stress
+      - all
+
+  # ─────────────────────────────────────
+  # E2E 測試 (Playwright)
+  # ─────────────────────────────────────
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.52.0-noble
+    container_name: playwright-runner
+    volumes:
+      - ./tests/e2e:/workspace
+      - ./reports:/workspace/reports
+    env_file:
+      - .env
+    working_dir: /workspace
+    entrypoint: ["npx", "playwright", "test"]
+    profiles:
+      - e2e
+      - all
