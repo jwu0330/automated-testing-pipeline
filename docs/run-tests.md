@@ -220,6 +220,55 @@ n8n 容器是 **DooD（Docker-out-of-Docker）** 模式，workflow 儲存在容�
 
 解法：**把「想保留的設定」都寫進 JSON**（Sheet ID、tab name、固定的 timeout 等）；只有**每次執行要變動的**（prompt 帶的 projectPick）才在 GUI 互動。
 
+### ⚠️ n8n 節點編輯常見坑（寫 / 改 workflow JSON 時檢查清單）
+
+n8n 某些節點有**必填欄位**，漏填會在 GUI 顯示紅色三角警告、Execute 步驟失敗。以下是本 pipeline 用到的節點、各自的必填欄位清單。**修改 JSON 後務必逐項對照，避免重複踩坑**。
+
+#### `n8n-nodes-base.form` (中間 Form, typeVersion 1)
+
+必填：
+- `parameters.operation`：`"page"`（中間 Form，送出後繼續往下）或 `"completion"`（終點，顯示完成畫面）
+- `parameters.formTitle`：字串
+- `parameters.formFields.values[]`：至少 1 個 field
+- 每個 field 必填 `fieldLabel`；若 `fieldType: "dropdown"` 則必填 `fieldOptions.values`（可用 expression 如 `={{ $json.options }}`）
+- `parameters.options.respondWith`：`"showText"` 或 `"redirect"`
+- `parameters.options.formSubmittedText`（若 respondWith=showText）：送出後顯示的文字
+
+過去踩過的坑：
+- ❌ 漏填 `options.respondWith` + `formSubmittedText` → GUI 噴紅三角、Execute 失敗
+- ❌ `operation: "completion"` 卻當中間 Form 用 → 送出後 workflow 停在這裡、下游不執行
+- ✅ 中間 Form 要用 `operation: "page"`
+
+#### `n8n-nodes-base.formTrigger` (起點 Form Trigger)
+
+- 只能當 workflow 起點，不能放中間
+- 若純粹「按鈕啟動」無需收集資料，用 `n8n-nodes-base.manualTrigger`（空參數即可），不要硬加沒意義的 dropdown
+
+#### `n8n-nodes-base.googleSheets` (typeVersion 4.5)
+
+必填：
+- `parameters.operation`：`"read"` / `"append"` / ...
+- `parameters.documentId`：`{ "__rl": true, "value": "...", "mode": "id" }`（**不是直接寫字串**，必須包 resourceLocator 物件）
+- `parameters.sheetName`：`{ "__rl": true, "value": "Sheet1", "mode": "name" }`（或 `"mode": "list"` + `value: gid`）
+- `credentials`：必須綁 Google Sheets OAuth credential，無法純 JSON 設定，**要在 GUI 點一次綁定**
+
+#### `n8n-nodes-base.executeCommand` (typeVersion 1)
+
+- `parameters.command`：字串；expression 型如 `={{ ... }}`
+- 可選 `parameters.options.executionTimeout`：毫秒；不設預設 2 分鐘，**長時間測試必加**
+- `onError`：`"stopWorkflow"` / `"continueRegularOutput"` / `"continueErrorOutput"`；注意 `continueErrorOutput` 會產生錯誤出口，若沒連下游錯誤會被吞掉
+
+#### `n8n-nodes-base.code` (typeVersion 2)
+
+- `parameters.mode`：`"runOnceForAllItems"` 或 `"runOnceForEachItem"`
+- `parameters.jsCode`：JS；`runOnceForEachItem` 模式用 `$json`，`runOnceForAllItems` 用 `$input.all()`
+
+#### 跨節點通則
+
+- `id` 欄位每個節點必須唯一；連線表 `connections` 的 key 是**節點 name**（不是 id）
+- 改 node name 時，**connections key 要跟著改**，否則匯入後連線斷掉
+- 有紅三角警告的節點 → 先在 GUI 手動把警告全消掉再儲存；不確定就去 n8n 官方節點文件對照
+
 ---
 
 ## 4. 執行專案客製測試

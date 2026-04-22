@@ -5,26 +5,13 @@
   "active": true,
   "nodes": [
     {
-      "parameters": {
-        "formTitle": "Testing Pipeline — Start",
-        "formDescription": "點 Submit 讀 Sheet 列出專案。",
-        "formFields": {
-          "values": [
-            {
-              "fieldLabel": "ready",
-              "fieldType": "dropdown",
-              "fieldOptions": { "values": [{ "option": "start" }] },
-              "requiredField": true
-            }
-          ]
-        },
-        "options": {}
-      },
+      "parameters": {},
       "id": "tp-01",
-      "name": "01 Form — Start",
-      "type": "n8n-nodes-base.formTrigger",
-      "typeVersion": 2.2,
-      "position": [0, 0]
+      "name": "01 Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "notes": "純按鈕觸發。點 n8n GUI 的 Execute workflow 就開始，不跳多餘的 Form。真正的專案選單在 04 Form — Pick Project。"
     },
     {
       "parameters": {
@@ -54,9 +41,9 @@
     },
     {
       "parameters": {
-        "operation": "completion",
+        "operation": "page",
         "formTitle": "Pick Project",
-        "formDescription": "選專案，scopes 留空用 Sheet 原值。",
+        "formDescription": "從 Sheet 讀到的專案清單，選一個要跑測試。scopes 留空則使用 Sheet 裡那一列的 scopes 值。",
         "formFields": {
           "values": [
             {
@@ -72,13 +59,17 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "respondWith": "showText",
+          "formSubmittedText": "已收到，workflow 開始執行。可到 n8n Executions 頁面追蹤進度。"
+        }
       },
       "id": "tp-04",
       "name": "04 Form — Pick Project",
       "type": "n8n-nodes-base.form",
       "typeVersion": 1,
-      "position": [750, 0]
+      "position": [750, 0],
+      "notes": "⚠️ n8n form v1 必填欄位：operation / formTitle / formFields / options.respondWith / options.formSubmittedText。漏填任一會在 GUI 噴紅三角警告、Execute 失敗。"
     },
     {
       "parameters": {
@@ -355,7 +346,7 @@
     }
   ],
   "connections": {
-    "01 Form — Start": { "main": [[{ "node": "02 Sheet — Read Rows", "type": "main", "index": 0 }]] },
+    "01 Manual Trigger": { "main": [[{ "node": "02 Sheet — Read Rows", "type": "main", "index": 0 }]] },
     "02 Sheet — Read Rows": { "main": [[{ "node": "03 Build Options", "type": "main", "index": 0 }]] },
     "03 Build Options": { "main": [[{ "node": "04 Form — Pick Project", "type": "main", "index": 0 }]] },
     "04 Form — Pick Project": { "main": [[{ "node": "05 Resolve + Precheck", "type": "main", "index": 0 }]] },
