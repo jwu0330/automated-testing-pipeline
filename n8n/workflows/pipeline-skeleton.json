@@ -29,8 +29,8 @@
     {
       "parameters": {
         "operation": "read",
-        "documentId": { "__rl": true, "value": "CHANGE_ME_SHEET_ID", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Projects", "mode": "name" },
+        "documentId": { "__rl": true, "value": "11e25IFuf-CtztktJh4pvOaOcB_CQgilLaU6WtEoOeao", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Sheet1", "mode": "name" },
         "options": {}
       },
       "id": "tp-02",
@@ -38,7 +38,8 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [250, 0],
-      "onError": "stopWorkflow"
+      "onError": "stopWorkflow",
+      "notes": "綁 Google Sheets credential 後就能用。Sheet ID 已寫死在 JSON 裡（testing-pipeline-batch / Sheet1），下次重匯會保留。要換專案 Sheet 只要改此節點的 documentId / sheetName。"
     },
     {
       "parameters": {

@@ -187,19 +187,38 @@ Sheet 規範與欄位見 [google-sheets-schema.md](./google-sheets-schema.md)。
 
 ### 首次設定
 
-匯入 workflow 後，需要在 n8n GUI 做兩件事才能實際跑：
+匯入 workflow 後，需要在 n8n GUI 做**一件事**才能實際跑：
 
-1. **綁 Google Sheets credential**：打開 `02 Sheet — Read Rows` 節點 → Credentials → 新增 Google Sheets OAuth → 授權
-2. **設定 documentId**：同節點內，把 `CHANGE_ME_SHEET_ID` 換成你的 Sheet ID（URL 中 `/d/` 和 `/edit` 之間那段）
+1. **綁 Google Sheets credential**：打開 `02 Sheet — Read Rows` 節點 → Credentials → 新增 Google Sheets OAuth → 授權你的 Google 帳號
 
-Sheet 建立：檔名 `testing-pipeline-batch`，首個 tab 命名 `Projects`，首列 header 依 [google-sheets-schema.md](./google-sheets-schema.md) 設定。
+Sheet ID / 分頁簽名都已經寫死在 workflow JSON 裡（檔案 `n8n/workflows/pipeline-skeleton.json` 的 `02 Sheet — Read Rows` 節點），`docker exec n8n n8n import:workflow` 會保留這些值，**不會被清掉**。
 
-匯入 workflow：
+目前寫死的設定：
+- `documentId`: `11e25IFuf-CtztktJh4pvOaOcB_CQgilLaU6WtEoOeao`（testing-pipeline-batch Sheet）
+- `sheetName`: `Sheet1`
+
+Sheet 建立：檔名 `testing-pipeline-batch`，首個 tab 保留預設 `Sheet1`，首列 header 依 [google-sheets-schema.md](./google-sheets-schema.md) 設定。
+
+### 換不同的 Sheet / tab
+
+1. **方法 A（推薦）**：直接改 `n8n/workflows/pipeline-skeleton.json` 的 `02 Sheet — Read Rows` 節點的 `documentId.value` 和 `sheetName.value`，重匯入，保證下次重啟也不會歸零
+2. **方法 B（臨時用）**：在 n8n GUI 雙擊 `02 Sheet — Read Rows` 改 Document / Sheet 欄位；**但下次執行 `docker exec n8n n8n import:workflow` 會被 JSON 覆寫**，要保留請同步改 JSON
+
+匯入 workflow 的指令：
 
 ```bash
 docker cp n8n/workflows/pipeline-skeleton.json n8n:/tmp/pipeline.json
 docker exec n8n n8n import:workflow --input=/tmp/pipeline.json
 ```
+
+### 為什麼重啟後 GUI 的改動會消失？
+
+n8n 容器是 **DooD（Docker-out-of-Docker）** 模式，workflow 儲存在容器內的 SQLite。但每次 `docker exec ... import:workflow` 會**以 JSON 檔為準**覆寫 DB 裡的 workflow。所以：
+
+- GUI 改 → 只存在 DB → `n8n import:workflow` 會覆蓋掉
+- JSON 改 + 重匯 → 變成新的「真相來源」→ GUI 跟著變
+
+解法：**把「想保留的設定」都寫進 JSON**（Sheet ID、tab name、固定的 timeout 等）；只有**每次執行要變動的**（prompt 帶的 projectPick）才在 GUI 互動。
 
 ---
 
