@@ -26,7 +26,14 @@ NAME="${1:-}"
 SCOPE="${2:-all}"
 
 if [ -z "$NAME" ]; then
-    echo "用法：bash scripts/run-project.sh <name> [all|precheck|ssl|security|stress|static|unit|e2e|api-test|auth-test|db-test|visual-test|browser-compat|nuclei|lighthouse|monkey|trivy|links|summary]"
+    echo "用法：bash scripts/run-project.sh <name> [scope]"
+    echo ""
+    echo "scope 可以是："
+    echo "  Preset：all | remote-only | local-only"
+    echo "  單一：  precheck | ssl | security | stress | static | unit | e2e"
+    echo "          api-test | auth-test | db-test | visual-test | browser-compat"
+    echo "          nuclei | lighthouse | monkey | trivy | links | summary"
+    echo "  多選：  以逗號分隔，例如 ssl,e2e,lighthouse"
     exit 1
 fi
 
@@ -60,14 +67,23 @@ if [ -z "$LOCAL_PATH" ] || [ "$LOCAL_PATH" = "null" ]; then
     LOCAL_PATH="$REG_PATH"
     [ "$SCHEMA_VERSION" = "1" ] && echo "  ℹ️  schema v1 偵測到，local_path 從 registry 補上：$LOCAL_PATH"
 fi
+# WARNINGS[]：收集所有前置檢查與 skip 訊息；收尾寫到 reports/<name>/warnings.txt
+WARNINGS=()
+
 # 再次檢查：設為空字串表示「只跑網路測試」
 if [ -z "$LOCAL_PATH" ] || [ "$LOCAL_PATH" = '""' ]; then
     PROJECT_PATH=""
     LOCAL_MODE=false
 else
     PROJECT_PATH="$LOCAL_PATH"
-    [ -d "$PROJECT_PATH" ] || { echo "❌ local_path 不存在：$PROJECT_PATH"; exit 1; }
-    LOCAL_MODE=true
+    if [ ! -d "$PROJECT_PATH" ]; then
+        echo "⚠️  local_path 不存在：$PROJECT_PATH → 降級為 URL-only 模式（skip static/unit/trivy/db-test）"
+        WARNINGS+=("local_path 不存在：$PROJECT_PATH → 跳過 static/unit/trivy/db-test")
+        PROJECT_PATH=""
+        LOCAL_MODE=false
+    else
+        LOCAL_MODE=true
+    fi
 fi
 
 [ -n "$TARGET_URL" ] || { echo "❌ testing.yml 必填：project.target_url"; exit 1; }
@@ -89,6 +105,15 @@ export TARGET_URL PROJECT_NAME="$NAME"
 REPORTS_DIR="$ROOT/reports/$NAME"
 REPORTS_RAW="$REPORTS_DIR/raw"
 mkdir -p "$REPORTS_RAW"
+
+# ─── 合併 n8n precheck 階段寫進來的 warnings（若有）──
+if [ -f "$REPORTS_DIR/n8n-precheck-warnings.txt" ]; then
+    while IFS= read -r line; do
+        [ -n "$line" ] && WARNINGS+=("$line")
+    done < "$REPORTS_DIR/n8n-precheck-warnings.txt"
+    # 讀完就刪，避免下次殘留
+    rm -f "$REPORTS_DIR/n8n-precheck-warnings.txt"
+fi
 
 # Docker 內部看到的 raw 路徑（所有工具寫這裡）
 export REPORTS_RAW_DIR="$REPORTS_RAW"
@@ -115,44 +140,103 @@ echo "╚═══════════════════════�
 
 # ─── 開關判斷：自動偵測 or 讀 testing.yml 覆寫 ───────────────
 # 傳回：0=執行、1=略過
+# 副作用：略過時 append 一條有可讀原因的 warning 到 WARNINGS[]
 enabled() {
     local t="$1"
     local ov
     ov=$(yq -r ".tests.${t}.enabled // \"auto\"" "$TESTING_YML")
     case "$ov" in
         true)  return 0 ;;
-        false) return 1 ;;
+        false)
+            WARNINGS+=("$t：testing.yml 關閉（tests.$t.enabled=false）")
+            return 1
+            ;;
     esac
     # auto
     case "$t" in
-        ssl)      [[ "$TARGET_URL" == https://* ]] ;;
-        security) true ;;
-        stress)   true ;;
+        ssl)
+            if [[ "$TARGET_URL" == https://* ]]; then
+                return 0
+            else
+                WARNINGS+=("ssl：target_url 非 https，跳過 SSL 掃描")
+                return 1
+            fi
+            ;;
+        security)   return 0 ;;
+        stress)     return 0 ;;
         static)
-            $LOCAL_MODE || return 1
-            find "$PROJECT_PATH" -maxdepth 4 -name "*.php" \
+            if ! $LOCAL_MODE; then
+                WARNINGS+=("static：local_path 未設/不存在，跳過 PHPStan")
+                return 1
+            fi
+            if find "$PROJECT_PATH" -maxdepth 4 -name "*.php" \
                 -not -path "*/vendor/*" -not -path "*/node_modules/*" \
                 -not -path "*/.testing/*" -not -path "*/.git/*" 2>/dev/null \
-                | head -1 | grep -q .
+                | head -1 | grep -q .; then
+                return 0
+            else
+                WARNINGS+=("static：未偵測到 PHP 檔，跳過 PHPStan")
+                return 1
+            fi
             ;;
         unit)
-            $LOCAL_MODE && [ -f "$PROJECT_PATH/.testing/unit/phpunit.xml" ]
+            if ! $LOCAL_MODE; then
+                WARNINGS+=("unit：local_path 未設/不存在，跳過 PHPUnit")
+                return 1
+            fi
+            if [ ! -f "$PROJECT_PATH/.testing/unit/phpunit.xml" ]; then
+                WARNINGS+=("unit：未偵測到 .testing/unit/phpunit.xml，跳過 PHPUnit")
+                return 1
+            fi
+            return 0
             ;;
         e2e)
-            $LOCAL_MODE && [ -f "$PROJECT_PATH/.testing/e2e/package.json" ]
+            if ! $LOCAL_MODE; then
+                WARNINGS+=("e2e：local_path 未設/不存在，跳過 Playwright")
+                return 1
+            fi
+            if [ ! -f "$PROJECT_PATH/.testing/e2e/package.json" ]; then
+                WARNINGS+=("e2e：未偵測到 .testing/e2e/package.json，跳過 Playwright")
+                return 1
+            fi
+            return 0
             ;;
-        nuclei)     true ;;
-        lighthouse) true ;;
-        monkey)     true ;;
-        trivy)      $LOCAL_MODE ;;
-        links)      true ;;
+        nuclei)     return 0 ;;
+        lighthouse) return 0 ;;
+        monkey)     return 0 ;;
+        trivy)
+            if ! $LOCAL_MODE; then
+                WARNINGS+=("trivy：local_path 未設/不存在，跳過 Trivy")
+                return 1
+            fi
+            return 0
+            ;;
+        links)      return 0 ;;
         api-test)
-            $LOCAL_MODE || return 1
-            ls "$PROJECT_PATH/.testing/api/collections/"*.postman_collection.json >/dev/null 2>&1
+            if ! $LOCAL_MODE; then
+                WARNINGS+=("api-test：local_path 未設/不存在，跳過 API 測試")
+                return 1
+            fi
+            if ! ls "$PROJECT_PATH/.testing/api/collections/"*.postman_collection.json >/dev/null 2>&1; then
+                WARNINGS+=("api-test：未偵測到 Postman collection，跳過 API 測試")
+                return 1
+            fi
+            # 附加檢查 admin 帳密
+            if [ -z "${ADMIN_USERNAME:-}" ] || [ -z "${ADMIN_PASSWORD:-}" ]; then
+                WARNINGS+=("api-test：ADMIN_USERNAME/PASSWORD 未提供，API/Auth 測試身分可能不完整")
+            fi
+            return 0
             ;;
         db-test)
-            $LOCAL_MODE || return 1
-            ls "$PROJECT_PATH/.testing/unit/fixtures"/*.sql >/dev/null 2>&1
+            if ! $LOCAL_MODE; then
+                WARNINGS+=("db-test：local_path 未設/不存在，跳過 DB 驗證")
+                return 1
+            fi
+            if ! ls "$PROJECT_PATH/.testing/unit/fixtures"/*.sql >/dev/null 2>&1; then
+                WARNINGS+=("db-test：未偵測到 .testing/unit/fixtures/*.sql，跳過 DB 驗證")
+                return 1
+            fi
+            return 0
             ;;
     esac
 }
@@ -671,49 +755,89 @@ run_summary() {
     node "$ROOT/scripts/summarize.js" "$NAME"
 }
 
-# ─── Dispatch ────
-case "$SCOPE" in
-    all)
-        run_precheck
-        run_static
-        run_unit
-        run_api_test
-        run_db_test
-        run_links
-        run_ssl
-        run_trivy
-        run_lighthouse
-        run_e2e
-        run_nuclei
-        run_security
-        run_stress
-        run_monkey
+# ─── Preset 展開：ALL / REMOTE_ONLY / LOCAL_ONLY → 具體 scope 列表 ────
+ALL_SCOPES="precheck,static,unit,api-test,db-test,links,ssl,trivy,lighthouse,e2e,nuclei,security,stress,monkey,summary"
+REMOTE_SCOPES="precheck,ssl,security,nuclei,stress,lighthouse,links,monkey,summary"
+LOCAL_SCOPES="static,unit,trivy,db-test,summary"
+
+expand_preset() {
+    case "$1" in
+        all|ALL)                echo "$ALL_SCOPES" ;;
+        remote-only|REMOTE_ONLY) echo "$REMOTE_SCOPES" ;;
+        local-only|LOCAL_ONLY)   echo "$LOCAL_SCOPES" ;;
+        *)                      echo "$1" ;;
+    esac
+}
+
+# ─── 執行單一 scope ────
+run_scope() {
+    case "$1" in
+        precheck)       run_precheck ;;
+        ssl)            run_ssl ;;
+        security)       run_security ;;
+        stress)         run_stress ;;
+        static)         run_static ;;
+        unit)           run_unit ;;
+        e2e)            run_e2e ;;
+        api-test)       run_api_test ;;
+        auth-test)      run_api_test ;;        # B6：共用 A3 的 Newman collection
+        db-test)        run_db_test ;;
+        visual-test)    run_visual_test ;;     # C2：Playwright --grep C2
+        browser-compat) run_browser_compat ;;  # C3：Playwright --grep C3
+        nuclei)         run_nuclei ;;
+        lighthouse)     run_lighthouse ;;
+        monkey)         run_monkey ;;
+        trivy)          run_trivy ;;
+        links)          run_links ;;
+        summary)        run_summary ;;
+        "")             : ;;  # 空字串忽略
+        *)
+            echo "⚠️  未知 scope，略過：$1"
+            WARNINGS+=("未知 scope：$1")
+            ;;
+    esac
+}
+
+# ─── Dispatch：支援 preset / 單一 scope / 逗號分隔多 scope ────
+EXPANDED=$(expand_preset "$SCOPE")
+IFS=',' read -ra SCOPE_LIST <<< "$EXPANDED"
+
+# 去重：保持第一次出現順序，避免重跑
+declare -A SEEN
+FINAL_SCOPES=()
+for s in "${SCOPE_LIST[@]}"; do
+    s_trim="$(echo "$s" | xargs)"  # 去前後空白
+    [ -z "$s_trim" ] && continue
+    if [ -z "${SEEN[$s_trim]:-}" ]; then
+        SEEN[$s_trim]=1
+        FINAL_SCOPES+=("$s_trim")
+    fi
+done
+
+echo ""
+echo "  解析 scopes：${FINAL_SCOPES[*]}"
+
+for s in "${FINAL_SCOPES[@]}"; do
+    run_scope "$s"
+done
+
+# 確保每次都產報告：若最後一項不是 summary，補跑一次
+LAST_SCOPE="${FINAL_SCOPES[-1]:-}"
+if [ "$LAST_SCOPE" != "summary" ] && [ ${#FINAL_SCOPES[@]} -gt 0 ]; then
+    # 已跑過 summary 就不重跑
+    if [ -z "${SEEN[summary]:-}" ]; then
         run_summary
-        ;;
-    precheck)       run_precheck ;;
-    ssl)            run_ssl ;;
-    security)       run_security ;;
-    stress)         run_stress ;;
-    static)         run_static ;;
-    unit)           run_unit ;;
-    e2e)            run_e2e ;;
-    api-test)       run_api_test ;;
-    auth-test)      run_api_test ;;        # B6：共用 A3 的 Newman collection（含 auth/permission test）
-    db-test)        run_db_test ;;
-    visual-test)    run_visual_test ;;     # C2：Playwright --grep C2
-    browser-compat) run_browser_compat ;;  # C3：Playwright --grep C3
-    nuclei)         run_nuclei ;;
-    lighthouse)     run_lighthouse ;;
-    monkey)         run_monkey ;;
-    trivy)          run_trivy ;;
-    links)          run_links ;;
-    summary)        run_summary ;;
-    *)
-        echo "❌ 未知 scope：$SCOPE"
-        echo "   可用：all | precheck | ssl | security | stress | static | unit | e2e | api-test | auth-test | db-test | visual-test | browser-compat | nuclei | lighthouse | monkey | trivy | links | summary"
-        exit 1
-        ;;
-esac
+    fi
+fi
+
+# ─── 寫出 warnings.txt（供 summarize.js 讀取）───
+if [ ${#WARNINGS[@]} -gt 0 ]; then
+    printf '%s\n' "${WARNINGS[@]}" > "$REPORTS_DIR/warnings.txt"
+    echo ""
+    echo "  ⚠️  ${#WARNINGS[@]} 條前置檢查警告 → $REPORTS_DIR/warnings.txt"
+else
+    rm -f "$REPORTS_DIR/warnings.txt" 2>/dev/null || true
+fi
 
 echo ""
 echo "╔══════════════════════════════════════════════════╗"

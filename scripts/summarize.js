@@ -381,9 +381,17 @@ function parseLychee() {
   } catch (e) { return { status: 'parse-error', error: e.message }; }
 }
 
+// ─── ⓪ Warnings（來自 run-project.sh 的 WARNINGS[] / n8n Precheck）──
+function parseWarnings() {
+  const p = path.join(REPORT_DIR, 'warnings.txt');
+  if (!exists(p)) return [];
+  return read(p).split('\n').map(l => l.trim()).filter(Boolean);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 解析
 // ═══════════════════════════════════════════════════════════════
+const warnings = parseWarnings();
 const s  = parseSSL();
 const ps = parsePHPStan();
 const z  = parseZAP();
@@ -408,6 +416,18 @@ L.push(`# ${project} 測試報告`);
 L.push('');
 L.push(`**${now}** · 第 ${history.length + 1} 次執行`);
 L.push('');
+
+// ─── 前置檢查警告（若有）──────────────────────────────────
+if (warnings.length) {
+  L.push('## 前置檢查警告');
+  L.push('');
+  L.push(`共 ${warnings.length} 條警告（來自 run-project.sh 或 n8n Precheck）：`);
+  L.push('');
+  for (const w of warnings) {
+    L.push(`- ⚠️  ${w}`);
+  }
+  L.push('');
+}
 
 // ─── 摘要 ────────────────────────────────────────────────
 L.push('## 摘要');
@@ -801,6 +821,7 @@ const structured = {
   project,
   timestamp: now,
   run_count: history.length + 1,
+  warnings,
   ssl: s.status ? { status: s.status } : { grade: s.grade, score: parseInt(s.score, 10) || null },
   static: ps.status ? { status: ps.status } : {
     errors: ps.total,

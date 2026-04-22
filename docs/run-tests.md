@@ -95,8 +95,77 @@ bash scripts/register-project.sh your-project /path/to/your-project
 範例：
 
 ```bash
-bash scripts/run-project.sh babydodofun ssl        # 只跑 SSL
-bash scripts/run-project.sh babydodofun            # 全部測試 + 評分卡
+bash scripts/run-project.sh babydodofun ssl              # 只跑 SSL
+bash scripts/run-project.sh babydodofun                  # 全部測試 + 評分卡
+bash scripts/run-project.sh babydodofun ssl,e2e,lighthouse  # 逗號分隔多選
+bash scripts/run-project.sh babydodofun REMOTE_ONLY      # preset：只跑遠端
+bash scripts/run-project.sh babydodofun LOCAL_ONLY       # preset：只跑本地
+```
+
+### 3.1 Scope 逗號分隔與 Preset（v0.5+）
+
+`run-project.sh` 第 2 個參數支援：
+
+- **單項**（同上表的 scope 名稱）
+- **多項逗號分隔**：`ssl,e2e,lighthouse` → 依序跑這三項，去重、末尾自動補 `summary`
+- **Preset**（大寫或底線式都可以）：
+  - `ALL` / `all` — 全部（預設；同留空）
+  - `REMOTE_ONLY` / `remote-only` — `precheck, ssl, security, nuclei, stress, lighthouse, links, monkey`
+  - `LOCAL_ONLY` / `local-only` — `static, unit, trivy, db-test`
+
+Preset 會在執行前展開成具體 scope 清單，所以你在 log 會看到 `解析 scopes：...` 一行顯示真正會跑的項目。
+
+### 3.2 前置檢查行為：警告後繼續（v0.5+）
+
+從 v0.5 起，`local_path` 不存在不再是致命錯誤：
+
+- `target_url` 空 → **致命**（沒東西可測，exit 1）
+- `local_path` 不存在 → **warning**，降級為 URL-only 模式，自動 skip `static / unit / trivy / db-test`
+- `ADMIN_USERNAME/PASSWORD` 空 → warning，`api-test / auth-test` 會 skip
+- `E2E_USERNAME/PASSWORD` 空 → warning，`e2e` 降級為未登入流程
+- `target_url` 非 https → warning，`ssl` 會 skip
+
+所有 warning 會寫到 `reports/<project>/warnings.txt`，`summarize.js` 會把它們附到 `report.md` 的「前置檢查警告」段，並在 `report.json` 加入 `warnings: [...]` 陣列。
+
+---
+
+## 3.3 批次執行：從 Google Sheets 讀一份清單
+
+除了 CLI 單次執行，`n8n/workflows/pipeline-skeleton.json`（通用模板 workflow）提供**雙入口**：
+
+- **Form Trigger**（單發）：在 n8n GUI 點 Execute → 填 Form 欄位 → 跑一次
+- **Google Sheets**（批次）：把 `00b` 節點換成 Google Sheets Read Rows → 每列一個專案 → `02 SplitInBatches (batchSize=1)` 逐一序列跑
+
+Sheet 欄位規範與範例見 [google-sheets-schema.md](./google-sheets-schema.md)。
+
+關鍵節點流程：
+
+```
+00a Form Trigger            ─┐
+00b Google Sheets Read Rows ─┤→ 01 Normalize Input → 01.5 Filter enabled
+                             │    → 02 SplitInBatches (batchSize=1)
+                             │       → 03 Precheck & Warning
+                             │       → 04 write-project-config.sh (動態寫 testing.yml + .env)
+                             │       → 05 register-project.sh
+                             │       → 06 run-project.sh <name> <scopes_csv>
+                             │       → 07 summarize.js --json
+                             │       → 08 Parse Results
+                             │       → 09 IF notifyEmail 非空 + 需通知 → 10 Send Email (該列)
+                             │    (SplitInBatches done)
+                             └→ 11 Aggregate Batch Summary → 12 Send Batch Summary Email (env.BATCH_NOTIFY_EMAIL)
+```
+
+特點：
+- **逐一序列**：`batchSize=1` 避免 Docker 資源搶佔和目標站壓力堆疊
+- **警告不致命**：03 Precheck 僅在 `projectName` / `targetUrl` 空時 throw；其他缺欄位只記 warning 並 skip 相關 scope
+- **ephemeral 模式**：`localPath` 空或不存在時，`write-project-config.sh` 會寫到 `<pipeline>/.testing/ephemeral/<name>/`，`register-project.sh` 指向該路徑
+- **批次總結**：全部跑完後寄一封總結到 `$env.BATCH_NOTIFY_EMAIL`（在 pipeline 的 `.env` 設定）
+
+匯入 workflow：
+
+```bash
+docker cp n8n/workflows/pipeline-skeleton.json n8n:/tmp/pipeline.json
+docker exec n8n n8n import:workflow --input=/tmp/pipeline.json
 ```
 
 ---
