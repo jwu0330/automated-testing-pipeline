@@ -5,51 +5,27 @@
   "active": true,
   "nodes": [
     {
-      "parameters": {},
-      "id": "tp-01",
-      "name": "01 Manual Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [0, 0],
-      "notes": "純按鈕觸發。點 n8n GUI 的 Execute workflow 就開始，不跳多餘的 Form。真正的專案選單在 04 Form — Pick Project。"
-    },
-    {
       "parameters": {
-        "operation": "read",
-        "documentId": { "__rl": true, "value": "11e25lFuf-CtztktJh4pvOaOcB_CQgilLaU6WtEoOeao", "mode": "id" },
-        "sheetName": { "__rl": true, "value": "Sheet1", "mode": "name" },
-        "options": {}
-      },
-      "id": "tp-02",
-      "name": "02 Sheet — Read Rows",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [250, 0],
-      "onError": "stopWorkflow",
-      "notes": "綁 Google Sheets credential 後就能用。Sheet ID 已寫死在 JSON 裡（testing-pipeline-batch / Sheet1），下次重匯會保留。要換專案 Sheet 只要改此節點的 documentId / sheetName。"
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// 03 Build Options — 純 ASCII ' | ' 分隔符\nconst SEP = ' | ';\nconst rows = $input.all().map(i => i.json);\nconst options = rows\n  .filter(r => r.project_name)\n  .map(r => ({ option: `${r.project_name}${SEP}${r.target_url || '(no url)'}` }));\nif (!options.length) throw new Error('Sheet 讀不到任何 project_name');\nreturn [{ json: { options, allRows: rows } }];"
-      },
-      "id": "tp-03",
-      "name": "03 Build Options",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [500, 0]
-    },
-    {
-      "parameters": {
-        "operation": "page",
-        "formTitle": "Pick Project",
-        "formDescription": "從 Sheet 讀到的專案清單，選一個要跑測試。scopes 留空則使用 Sheet 裡那一列的 scopes 值。",
+        "formTitle": "Testing Pipeline",
+        "formDescription": "選擇要跑測試的專案。新增 Sheet 列後請同步更新此節點的 projectPick options。",
         "formFields": {
           "values": [
             {
               "fieldLabel": "projectPick",
               "fieldType": "dropdown",
-              "fieldOptions": { "values": "={{ $json.options }}" },
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "babydodofun"
+                  },
+                  {
+                    "option": "landing-page"
+                  },
+                  {
+                    "option": "legacy-intranet"
+                  }
+                ]
+              },
               "requiredField": true
             },
             {
@@ -58,323 +34,707 @@
               "requiredField": false
             }
           ]
-        },
-        "options": {
-          "respondWith": "showText",
-          "formSubmittedText": "已收到，workflow 開始執行。可到 n8n Executions 頁面追蹤進度。"
         }
       },
-      "id": "tp-04",
-      "name": "04 Form — Pick Project",
-      "type": "n8n-nodes-base.form",
-      "typeVersion": 1,
-      "position": [750, 0],
-      "notes": "⚠️ n8n form v1 必填欄位：operation / formTitle / formFields / options.respondWith / options.formSubmittedText。漏填任一會在 GUI 噴紅三角警告、Execute 失敗。"
+      "id": "tp-01",
+      "name": "01 Form Trigger (pick project)",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "單頁 Form：直接呈現 Sheet 的 project_name dropdown。options 寫死在這裡，新增 Sheet 列時需同步更新此節點的 fieldOptions.values。原因：n8n formTrigger 在 Form 渲染前無法先讀 Sheet；試過多頁 Form（Trigger→Sheet→Code→Form）但 n8n GUI 會合併欄位、動態 options 拿不到資料。"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "11e25lFuf-CtztktJh4pvOaOcB_CQgilLaU6WtEoOeao",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "project_name",
+              "lookupValue": "={{ $json.projectPick }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "id": "tp-02",
+      "name": "02 Sheet — Read Selected Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        250,
+        0
+      ],
+      "onError": "stopWorkflow",
+      "notes": "只讀使用者選中的那一列（project_name 比對 Form 的 projectPick）。綁 Google Sheets credential 後才能執行；Sheet ID 寫死在 JSON 重匯會保留，credential 綁定不在 JSON 裡、每次重匯需手動在 GUI 重選一次。"
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// 05 Resolve — 拆 pick 拿 row；寫 testing.yml / .env；**只把精簡 schema 往下傳**\n// 下游節點只看 projectName / scopes / warnings，不再帶 Sheet 整列資料\n\nconst pick = ($json.projectPick || '').trim();\nconst scopesOverride = ($json.scopesOverride || '').trim();\nconst allRows = $('03 Build Options').first().json.allRows || [];\n\n// 三層 fallback 找 row（防 dash/unicode 坑）\nlet row = allRows.find(r => pick.startsWith(r.project_name + ' | '));\nif (!row) row = allRows.find(r => r.project_name && pick.startsWith(r.project_name));\nif (!row) row = allRows.find(r => r.project_name === pick);\nif (!row) throw new Error(`找不到專案：pick='${pick}'`);\n\n// Preset 展開\nconst ALL    = ['precheck','static','unit','api-test','db-test','links','ssl','trivy','lighthouse','e2e','nuclei','security','stress','monkey'];\nconst REMOTE = ['precheck','ssl','security','nuclei','stress','lighthouse','links','monkey'];\nconst LOCAL  = ['static','unit','trivy','db-test'];\nfunction parseScopes(raw) {\n  if (Array.isArray(raw)) return raw;\n  if (!raw) return [];\n  return String(raw).split(',').map(s => s.trim()).filter(Boolean);\n}\nfunction expandPresets(list) {\n  const out = new Set();\n  for (const s of list) {\n    if (s === 'ALL' || s === 'all') ALL.forEach(x => out.add(x));\n    else if (s === 'REMOTE_ONLY' || s === 'remote-only') REMOTE.forEach(x => out.add(x));\n    else if (s === 'LOCAL_ONLY' || s === 'local-only') LOCAL.forEach(x => out.add(x));\n    else out.add(s);\n  }\n  return [...out];\n}\nconst scopes = expandPresets(parseScopes(scopesOverride || row.scopes));\n\n// Precheck warnings（改成只記不阻擋，致命才 throw）\nconst warnings = [];\nif (!row.project_name) throw new Error('project_name 空');\nif (!row.target_url)   throw new Error('target_url 空');\nconst scopeSet = new Set(scopes);\nif (!row.local_path) {\n  warnings.push('local_path 未設 → skip static/unit/trivy/db-test');\n  ['static','unit','trivy','db-test'].forEach(s => scopeSet.delete(s));\n}\nif (!row.target_url.startsWith('https://') && scopeSet.has('ssl')) {\n  warnings.push('target_url 非 https → skip ssl');\n  scopeSet.delete('ssl');\n}\nconst finalScopes = [...scopeSet];\n\n// 精簡 schema 輸出（下游只看這些；row 的其他資料 08 那邊會寫進 testing.yml + .env）\nreturn [{ json: {\n  projectName: row.project_name,\n  scopes: finalScopes,\n  scopesCsv: finalScopes.join(','),\n  warnings,\n  // 臨時欄位：只給 08 Write 用，寫完就在 09 砍\n  _rawRow: row\n}}];"
+        "jsCode": "// 03 Resolve + Precheck — 02 已經讀到選中的那一列，這裡展開 scopes + 做 precheck\n// 下游節點只看 projectName / scopes / warnings；原始 Sheet row 藏在 _rawRow 只給 04 Prepare Write Args 用\n\nconst row = $json;\nconst scopesOverride = ($('01 Form Trigger (pick project)').first().json.scopesOverride || '').trim();\n\nif (!row.project_name) throw new Error('Sheet row 缺 project_name');\nif (!row.target_url)   throw new Error('Sheet row 缺 target_url');\n\n// Preset 展開\nconst ALL    = ['precheck','static','unit','api-test','db-test','links','ssl','trivy','lighthouse','e2e','nuclei','security','stress','monkey'];\nconst REMOTE = ['precheck','ssl','security','nuclei','stress','lighthouse','links','monkey'];\nconst LOCAL  = ['static','unit','trivy','db-test'];\nfunction parseScopes(raw) {\n  if (Array.isArray(raw)) return raw;\n  if (!raw) return [];\n  return String(raw).split(',').map(s => s.trim()).filter(Boolean);\n}\nfunction expandPresets(list) {\n  const out = new Set();\n  for (const s of list) {\n    if (s === 'ALL' || s === 'all') ALL.forEach(x => out.add(x));\n    else if (s === 'REMOTE_ONLY' || s === 'remote-only') REMOTE.forEach(x => out.add(x));\n    else if (s === 'LOCAL_ONLY' || s === 'local-only') LOCAL.forEach(x => out.add(x));\n    else out.add(s);\n  }\n  return [...out];\n}\nconst scopes = expandPresets(parseScopes(scopesOverride || row.scopes));\n\n// Precheck warnings\nconst warnings = [];\nconst scopeSet = new Set(scopes);\nif (!row.local_path) {\n  warnings.push('local_path 未設 → skip static/unit/trivy/db-test');\n  ['static','unit','trivy','db-test'].forEach(s => scopeSet.delete(s));\n}\nif (!row.target_url.startsWith('https://') && scopeSet.has('ssl')) {\n  warnings.push('target_url 非 https → skip ssl');\n  scopeSet.delete('ssl');\n}\nconst finalScopes = [...scopeSet];\n\nreturn [{ json: {\n  projectName: row.project_name,\n  scopes: finalScopes,\n  scopesCsv: finalScopes.join(','),\n  warnings,\n  _rawRow: row\n}}];"
       },
-      "id": "tp-05",
-      "name": "05 Resolve + Precheck",
+      "id": "tp-03",
+      "name": "03 Resolve + Precheck",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1000, 0],
-      "notes": "合併原 04 Resolve + 06 Normalize + 07 Precheck；輸出精簡 schema。下游節點只看 projectName / scopes / warnings。"
+      "position": [
+        500,
+        0
+      ],
+      "notes": "展開 scopes preset + 做 precheck。02 已經透過 filter 只回傳選中那列，不用在這裡比對。"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
         "jsCode": "// 06 Prepare Write Args — 從 _rawRow 生 base64 env + 把 _rawRow 砍掉\nconst r = $json._rawRow || {};\nconst envLines = [];\nconst add = (k, v) => { if (v) envLines.push(`${k}=${v}`); };\nadd('ADMIN_USERNAME', r.admin_username);\nadd('ADMIN_PASSWORD', r.admin_password);\nadd('E2E_USERNAME', r.e2e_username);\nadd('E2E_PASSWORD', r.e2e_password);\nfor (let i = 1; i <= 5; i++) {\n  add(`USER${i}_USERNAME`, r[`user${i}_username`]);\n  add(`USER${i}_PASSWORD`, r[`user${i}_password`]);\n  add(`USER${i}_LABEL`,    r[`user${i}_label`]);\n}\nconst envB64 = Buffer.from(envLines.join('\\n') + (envLines.length ? '\\n' : ''), 'utf-8').toString('base64');\nreturn {\n  projectName: $json.projectName,\n  scopes: $json.scopes,\n  scopesCsv: $json.scopesCsv,\n  warnings: $json.warnings,\n  // 只給 07 Write 用\n  _writeArgs: {\n    localPath: r.local_path || '',\n    targetUrl: r.target_url || '',\n    phpVersion: r.php_version || '8.1',\n    envB64\n  }\n};"
       },
-      "id": "tp-06",
-      "name": "06 Prepare Write Args",
+      "id": "tp-04",
+      "name": "04 Prepare Write Args",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1250, 0],
+      "position": [
+        750,
+        0
+      ],
       "notes": "從 _rawRow 組 write-project-config.sh 需要的 5 個參數；砍掉其他 Sheet 欄位。"
     },
     {
       "parameters": {
         "command": "=bash scripts/write-project-config.sh {{ JSON.stringify($json.projectName) }} {{ JSON.stringify($json._writeArgs.localPath) }} {{ JSON.stringify($json._writeArgs.targetUrl) }} {{ JSON.stringify($json._writeArgs.phpVersion) }} {{ JSON.stringify($json._writeArgs.envB64) }}"
       },
-      "id": "tp-07",
-      "name": "07 Write testing.yml + .env",
+      "id": "tp-05",
+      "name": "05 Write testing.yml + .env",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [1500, 0],
+      "position": [
+        1000,
+        0
+      ],
       "onError": "stopWorkflow"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// 08 Extract registry path + register + 精簡 JSON（徹底清掉 _writeArgs / _rawRow）\nconst stdout = $json.stdout || '';\nconst lines = stdout.trim().split('\\n').filter(Boolean);\nconst registryPath = lines[lines.length - 1] || '';\nif (!registryPath) throw new Error('write-project-config.sh 未回傳 registry path');\n\nconst upstream = $('06 Prepare Write Args').itemMatching($itemIndex).json;\nreturn {\n  projectName: upstream.projectName,\n  scopes: upstream.scopes,\n  scopesCsv: upstream.scopesCsv,\n  warnings: upstream.warnings,\n  registryPath\n};"
+        "jsCode": "// 06 Extract registry path + 精簡 JSON（徹底清掉 _writeArgs / _rawRow）\nconst stdout = $json.stdout || '';\nconst lines = stdout.trim().split('\\n').filter(Boolean);\nconst registryPath = lines[lines.length - 1] || '';\nif (!registryPath) throw new Error('write-project-config.sh 未回傳 registry path');\n\nconst upstream = $('04 Prepare Write Args').itemMatching($itemIndex).json;\nreturn {\n  projectName: upstream.projectName,\n  scopes: upstream.scopes,\n  scopesCsv: upstream.scopesCsv,\n  warnings: upstream.warnings,\n  registryPath\n};"
       },
-      "id": "tp-08",
-      "name": "08 Extract Path",
+      "id": "tp-06",
+      "name": "06 Extract Path",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1750, 0]
+      "position": [
+        1250,
+        0
+      ]
     },
     {
       "parameters": {
         "command": "=bash scripts/register-project.sh {{ JSON.stringify($json.projectName) }} {{ JSON.stringify($json.registryPath) }} && mkdir -p reports/{{ $json.projectName }} && printf '%s\\n' {{ JSON.stringify(($json.warnings || []).join('\\n')) }} > reports/{{ $json.projectName }}/n8n-precheck-warnings.txt"
       },
-      "id": "tp-09",
-      "name": "09 Register + write warnings",
+      "id": "tp-07",
+      "name": "07 Register + write warnings",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [2000, 0],
+      "position": [
+        1500,
+        0
+      ],
       "onError": "stopWorkflow"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('precheck') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' precheck' : 'echo [SKIP] precheck not in scopes' }}",
-        "options": { "executionTimeout": 120000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('precheck') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' precheck' : 'echo [SKIP] precheck not in scopes' }}",
+        "options": {
+          "executionTimeout": 120000
+        }
+      },
+      "id": "tp-08",
+      "name": "08 Precheck (HTTP probe)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1750,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('static') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' static' : 'echo [SKIP] static not in scopes' }}",
+        "options": {
+          "executionTimeout": 300000
+        }
+      },
+      "id": "tp-09",
+      "name": "09 Static (PHPStan)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('unit') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' unit' : 'echo [SKIP] unit not in scopes' }}",
+        "options": {
+          "executionTimeout": 600000
+        }
       },
       "id": "tp-10",
-      "name": "10 Precheck (HTTP probe)",
+      "name": "10 Unit (PHPUnit)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [2250, 0],
+      "position": [
+        2250,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('static') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' static' : 'echo [SKIP] static not in scopes' }}",
-        "options": { "executionTimeout": 300000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('api-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' api-test' : 'echo [SKIP] api-test not in scopes' }}",
+        "options": {
+          "executionTimeout": 600000
+        }
       },
       "id": "tp-11",
-      "name": "11 Static (PHPStan)",
+      "name": "11 API-Test (Newman multi-identity)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [2500, 0],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('unit') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' unit' : 'echo [SKIP] unit not in scopes' }}",
-        "options": { "executionTimeout": 600000 }
-      },
-      "id": "tp-12",
-      "name": "12 Unit (PHPUnit)",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [2750, 0],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('api-test') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' api-test' : 'echo [SKIP] api-test not in scopes' }}",
-        "options": { "executionTimeout": 600000 }
-      },
-      "id": "tp-13",
-      "name": "13 API-Test (Newman multi-identity)",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [3000, 0],
+      "position": [
+        2500,
+        0
+      ],
       "onError": "continueRegularOutput",
       "notes": "多身分迴圈（ADMIN + USER1~5）在 run-project.sh 內處理，產生 newman-junit-<id>.xml。"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('db-test') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' db-test' : 'echo [SKIP] db-test not in scopes' }}",
-        "options": { "executionTimeout": 300000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('db-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' db-test' : 'echo [SKIP] db-test not in scopes' }}",
+        "options": {
+          "executionTimeout": 300000
+        }
+      },
+      "id": "tp-12",
+      "name": "12 DB-Test (MySQL fixtures)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2750,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('links') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' links' : 'echo [SKIP] links not in scopes' }}",
+        "options": {
+          "executionTimeout": 300000
+        }
+      },
+      "id": "tp-13",
+      "name": "13 Links (Lychee)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3000,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('ssl') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' ssl' : 'echo [SKIP] ssl not in scopes' }}",
+        "options": {
+          "executionTimeout": 600000
+        }
       },
       "id": "tp-14",
-      "name": "14 DB-Test (MySQL fixtures)",
+      "name": "14 SSL (testssl.sh)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [3250, 0],
+      "position": [
+        3250,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('links') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' links' : 'echo [SKIP] links not in scopes' }}",
-        "options": { "executionTimeout": 300000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('trivy') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' trivy' : 'echo [SKIP] trivy not in scopes' }}",
+        "options": {
+          "executionTimeout": 300000
+        }
       },
       "id": "tp-15",
-      "name": "15 Links (Lychee)",
+      "name": "15 Trivy",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [3500, 0],
+      "position": [
+        3500,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('ssl') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' ssl' : 'echo [SKIP] ssl not in scopes' }}",
-        "options": { "executionTimeout": 600000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('lighthouse') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' lighthouse' : 'echo [SKIP] lighthouse not in scopes' }}",
+        "options": {
+          "executionTimeout": 600000
+        }
       },
       "id": "tp-16",
-      "name": "16 SSL (testssl.sh)",
+      "name": "16 Lighthouse",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [3750, 0],
+      "position": [
+        3750,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('trivy') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' trivy' : 'echo [SKIP] trivy not in scopes' }}",
-        "options": { "executionTimeout": 300000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('e2e') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' e2e' : 'echo [SKIP] e2e not in scopes' }}",
+        "options": {
+          "executionTimeout": 900000
+        }
       },
       "id": "tp-17",
-      "name": "17 Trivy",
+      "name": "17 E2E (Playwright)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [4000, 0],
+      "position": [
+        4000,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('lighthouse') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' lighthouse' : 'echo [SKIP] lighthouse not in scopes' }}",
-        "options": { "executionTimeout": 600000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('visual-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' visual-test' : 'echo [SKIP] visual-test not in scopes' }}",
+        "options": {
+          "executionTimeout": 600000
+        }
       },
       "id": "tp-18",
-      "name": "18 Lighthouse",
+      "name": "18 Visual (--grep C2)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [4250, 0],
+      "position": [
+        4250,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('e2e') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' e2e' : 'echo [SKIP] e2e not in scopes' }}",
-        "options": { "executionTimeout": 900000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('browser-compat') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' browser-compat' : 'echo [SKIP] browser-compat not in scopes' }}",
+        "options": {
+          "executionTimeout": 900000
+        }
       },
       "id": "tp-19",
-      "name": "19 E2E (Playwright)",
+      "name": "19 Browser Compat (--grep C3)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [4500, 0],
+      "position": [
+        4500,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('visual-test') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' visual-test' : 'echo [SKIP] visual-test not in scopes' }}",
-        "options": { "executionTimeout": 600000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('nuclei') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' nuclei' : 'echo [SKIP] nuclei not in scopes' }}",
+        "options": {
+          "executionTimeout": 900000
+        }
       },
       "id": "tp-20",
-      "name": "20 Visual (--grep C2)",
+      "name": "20 Nuclei",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [4750, 0],
+      "position": [
+        4750,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('browser-compat') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' browser-compat' : 'echo [SKIP] browser-compat not in scopes' }}",
-        "options": { "executionTimeout": 900000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('security') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' security' : 'echo [SKIP] security not in scopes' }}",
+        "options": {
+          "executionTimeout": 1200000
+        }
       },
       "id": "tp-21",
-      "name": "21 Browser Compat (--grep C3)",
+      "name": "21 Security (ZAP)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [5000, 0],
+      "position": [
+        5000,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('nuclei') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' nuclei' : 'echo [SKIP] nuclei not in scopes' }}",
-        "options": { "executionTimeout": 900000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('stress') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' stress' : 'echo [SKIP] stress not in scopes' }}",
+        "options": {
+          "executionTimeout": 300000
+        }
       },
       "id": "tp-22",
-      "name": "22 Nuclei",
+      "name": "22 Stress (k6)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [5250, 0],
+      "position": [
+        5250,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('security') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' security' : 'echo [SKIP] security not in scopes' }}",
-        "options": { "executionTimeout": 1200000 }
+        "command": "={{ $('06 Extract Path').first().json.scopes.includes('monkey') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' monkey' : 'echo [SKIP] monkey not in scopes' }}",
+        "options": {
+          "executionTimeout": 600000
+        }
       },
       "id": "tp-23",
-      "name": "23 Security (ZAP)",
+      "name": "23 Monkey (Gremlins)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [5500, 0],
+      "position": [
+        5500,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('stress') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' stress' : 'echo [SKIP] stress not in scopes' }}",
-        "options": { "executionTimeout": 300000 }
+        "command": "=node scripts/summarize.js {{ $('06 Extract Path').first().json.projectName }} --json"
       },
       "id": "tp-24",
-      "name": "24 Stress (k6)",
+      "name": "24 Summary Scorecard",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [5750, 0],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "command": "={{ $('08 Extract Path').first().json.scopes.includes('monkey') ? 'bash scripts/run-project.sh ' + $('08 Extract Path').first().json.projectName + ' monkey' : 'echo [SKIP] monkey not in scopes' }}",
-        "options": { "executionTimeout": 600000 }
-      },
-      "id": "tp-25",
-      "name": "25 Monkey (Gremlins)",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [6000, 0],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "command": "=node scripts/summarize.js {{ $('08 Extract Path').first().json.projectName }} --json"
-      },
-      "id": "tp-26",
-      "name": "26 Summary Scorecard",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [6250, 0],
+      "position": [
+        5750,
+        0
+      ],
       "onError": "continueRegularOutput",
       "notes": "彙整所有測試結果產出 report.md / report.json。"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// 27 Parse Results — 最後端點\nconst pname = $('08 Extract Path').first().json.projectName;\nconst warnings = $('08 Extract Path').first().json.warnings || [];\nlet parsed = {};\ntry {\n  parsed = JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    projectName: pname,\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    warnings\n  };\n}\nconst merged = [...new Set([...(parsed.warnings || []), ...warnings])];\nreturn {\n  projectName: pname,\n  overallScore: parsed.lighthouse?.avg?.performance ?? null,\n  reportDir: parsed.reports_dir,\n  reportMd: parsed.report_md,\n  warnings: merged,\n  // 展開摘要欄位，Schema 面板直接看\n  ssl: parsed.ssl,\n  static: parsed.static,\n  security: parsed.security,\n  stress: parsed.stress,\n  unit: parsed.unit,\n  e2e: parsed.e2e,\n  nuclei: parsed.nuclei,\n  lighthouse: parsed.lighthouse?.avg,\n  monkey: parsed.monkey,\n  trivy: parsed.trivy ? { total: parsed.trivy.total, critical: parsed.trivy.critical, high: parsed.trivy.high } : null,\n  links: parsed.links ? { total: parsed.links.total, errors: parsed.links.errors } : null\n};"
+        "jsCode": "// 27 Parse Results — 最後端點\nconst pname = $('06 Extract Path').first().json.projectName;\nconst warnings = $('06 Extract Path').first().json.warnings || [];\nlet parsed = {};\ntry {\n  parsed = JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    projectName: pname,\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    warnings\n  };\n}\nconst merged = [...new Set([...(parsed.warnings || []), ...warnings])];\nreturn {\n  projectName: pname,\n  overallScore: parsed.lighthouse?.avg?.performance ?? null,\n  reportDir: parsed.reports_dir,\n  reportMd: parsed.report_md,\n  warnings: merged,\n  // 展開摘要欄位，Schema 面板直接看\n  ssl: parsed.ssl,\n  static: parsed.static,\n  security: parsed.security,\n  stress: parsed.stress,\n  unit: parsed.unit,\n  e2e: parsed.e2e,\n  nuclei: parsed.nuclei,\n  lighthouse: parsed.lighthouse?.avg,\n  monkey: parsed.monkey,\n  trivy: parsed.trivy ? { total: parsed.trivy.total, critical: parsed.trivy.critical, high: parsed.trivy.high } : null,\n  links: parsed.links ? { total: parsed.links.total, errors: parsed.links.errors } : null\n};"
       },
-      "id": "tp-27",
-      "name": "27 Parse Results",
+      "id": "tp-25",
+      "name": "25 Parse Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [6500, 0]
+      "position": [
+        6000,
+        0
+      ]
     }
   ],
   "connections": {
-    "01 Manual Trigger": { "main": [[{ "node": "02 Sheet — Read Rows", "type": "main", "index": 0 }]] },
-    "02 Sheet — Read Rows": { "main": [[{ "node": "03 Build Options", "type": "main", "index": 0 }]] },
-    "03 Build Options": { "main": [[{ "node": "04 Form — Pick Project", "type": "main", "index": 0 }]] },
-    "04 Form — Pick Project": { "main": [[{ "node": "05 Resolve + Precheck", "type": "main", "index": 0 }]] },
-    "05 Resolve + Precheck": { "main": [[{ "node": "06 Prepare Write Args", "type": "main", "index": 0 }]] },
-    "06 Prepare Write Args": { "main": [[{ "node": "07 Write testing.yml + .env", "type": "main", "index": 0 }]] },
-    "07 Write testing.yml + .env": { "main": [[{ "node": "08 Extract Path", "type": "main", "index": 0 }]] },
-    "08 Extract Path": { "main": [[{ "node": "09 Register + write warnings", "type": "main", "index": 0 }]] },
-    "09 Register + write warnings": { "main": [[{ "node": "10 Precheck (HTTP probe)", "type": "main", "index": 0 }]] },
-    "10 Precheck (HTTP probe)": { "main": [[{ "node": "11 Static (PHPStan)", "type": "main", "index": 0 }]] },
-    "11 Static (PHPStan)": { "main": [[{ "node": "12 Unit (PHPUnit)", "type": "main", "index": 0 }]] },
-    "12 Unit (PHPUnit)": { "main": [[{ "node": "13 API-Test (Newman multi-identity)", "type": "main", "index": 0 }]] },
-    "13 API-Test (Newman multi-identity)": { "main": [[{ "node": "14 DB-Test (MySQL fixtures)", "type": "main", "index": 0 }]] },
-    "14 DB-Test (MySQL fixtures)": { "main": [[{ "node": "15 Links (Lychee)", "type": "main", "index": 0 }]] },
-    "15 Links (Lychee)": { "main": [[{ "node": "16 SSL (testssl.sh)", "type": "main", "index": 0 }]] },
-    "16 SSL (testssl.sh)": { "main": [[{ "node": "17 Trivy", "type": "main", "index": 0 }]] },
-    "17 Trivy": { "main": [[{ "node": "18 Lighthouse", "type": "main", "index": 0 }]] },
-    "18 Lighthouse": { "main": [[{ "node": "19 E2E (Playwright)", "type": "main", "index": 0 }]] },
-    "19 E2E (Playwright)": { "main": [[{ "node": "20 Visual (--grep C2)", "type": "main", "index": 0 }]] },
-    "20 Visual (--grep C2)": { "main": [[{ "node": "21 Browser Compat (--grep C3)", "type": "main", "index": 0 }]] },
-    "21 Browser Compat (--grep C3)": { "main": [[{ "node": "22 Nuclei", "type": "main", "index": 0 }]] },
-    "22 Nuclei": { "main": [[{ "node": "23 Security (ZAP)", "type": "main", "index": 0 }]] },
-    "23 Security (ZAP)": { "main": [[{ "node": "24 Stress (k6)", "type": "main", "index": 0 }]] },
-    "24 Stress (k6)": { "main": [[{ "node": "25 Monkey (Gremlins)", "type": "main", "index": 0 }]] },
-    "25 Monkey (Gremlins)": { "main": [[{ "node": "26 Summary Scorecard", "type": "main", "index": 0 }]] },
-    "26 Summary Scorecard": { "main": [[{ "node": "27 Parse Results", "type": "main", "index": 0 }]] }
+    "01 Form Trigger (pick project)": {
+      "main": [
+        [
+          {
+            "node": "02 Sheet — Read Selected Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Sheet — Read Selected Row": {
+      "main": [
+        [
+          {
+            "node": "03 Resolve + Precheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Resolve + Precheck": {
+      "main": [
+        [
+          {
+            "node": "04 Prepare Write Args",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Prepare Write Args": {
+      "main": [
+        [
+          {
+            "node": "05 Write testing.yml + .env",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Write testing.yml + .env": {
+      "main": [
+        [
+          {
+            "node": "06 Extract Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Extract Path": {
+      "main": [
+        [
+          {
+            "node": "07 Register + write warnings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Register + write warnings": {
+      "main": [
+        [
+          {
+            "node": "08 Precheck (HTTP probe)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Precheck (HTTP probe)": {
+      "main": [
+        [
+          {
+            "node": "09 Static (PHPStan)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Static (PHPStan)": {
+      "main": [
+        [
+          {
+            "node": "10 Unit (PHPUnit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Unit (PHPUnit)": {
+      "main": [
+        [
+          {
+            "node": "11 API-Test (Newman multi-identity)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 API-Test (Newman multi-identity)": {
+      "main": [
+        [
+          {
+            "node": "12 DB-Test (MySQL fixtures)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12 DB-Test (MySQL fixtures)": {
+      "main": [
+        [
+          {
+            "node": "13 Links (Lychee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "13 Links (Lychee)": {
+      "main": [
+        [
+          {
+            "node": "14 SSL (testssl.sh)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "14 SSL (testssl.sh)": {
+      "main": [
+        [
+          {
+            "node": "15 Trivy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "15 Trivy": {
+      "main": [
+        [
+          {
+            "node": "16 Lighthouse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "16 Lighthouse": {
+      "main": [
+        [
+          {
+            "node": "17 E2E (Playwright)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "17 E2E (Playwright)": {
+      "main": [
+        [
+          {
+            "node": "18 Visual (--grep C2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "18 Visual (--grep C2)": {
+      "main": [
+        [
+          {
+            "node": "19 Browser Compat (--grep C3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "19 Browser Compat (--grep C3)": {
+      "main": [
+        [
+          {
+            "node": "20 Nuclei",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "20 Nuclei": {
+      "main": [
+        [
+          {
+            "node": "21 Security (ZAP)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "21 Security (ZAP)": {
+      "main": [
+        [
+          {
+            "node": "22 Stress (k6)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "22 Stress (k6)": {
+      "main": [
+        [
+          {
+            "node": "23 Monkey (Gremlins)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "23 Monkey (Gremlins)": {
+      "main": [
+        [
+          {
+            "node": "24 Summary Scorecard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "24 Summary Scorecard": {
+      "main": [
+        [
+          {
+            "node": "25 Parse Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1", "binaryMode": "separate" },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
   "staticData": null,
   "pinData": {},
-  "tags": [{ "name": "pipeline" }, { "name": "universal-template" }]
+  "tags": [
+    {
+      "name": "pipeline"
+    },
+    {
+      "name": "universal-template"
+    }
+  ]
 }

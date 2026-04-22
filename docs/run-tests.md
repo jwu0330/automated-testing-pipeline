@@ -139,40 +139,35 @@ Sheet 規範與欄位見 [google-sheets-schema.md](./google-sheets-schema.md)。
 
 1. 打開 http://localhost:5678，開啟 `Testing Pipeline — Universal Template`
 2. 點右上 **Execute workflow**
-3. 第一張 Form（`01 Form — Start`）：選 `start` 按 Submit（純觸發用）
-4. 第二張 Form（`04 Form — Pick Project`）：dropdown 列出 Sheet 裡所有 `project_name — target_url`，選一個
-   - `scopesOverride` / `notifyEmailOverride` 留空就用 Sheet 原值；填了會覆寫
-5. Submit 後 workflow 開始跑，n8n executions 頁面可以即時看進度
-6. 跑完產 `reports/<name>/report.md`；要再跑一個專案，回到 1 重來
+3. 單一 Form（`01 Form Trigger (pick project)`）：dropdown 選一個專案名稱
+   - `scopesOverride` 留空就用 Sheet 裡那一列的 scopes；填了會覆寫（支援逗號分隔 / `ALL` / `REMOTE_ONLY` / `LOCAL_ONLY`）
+4. Submit 後 workflow 開始跑，n8n executions 頁面可以即時看 08~23 每個測試節點的狀態
+5. 跑完產 `reports/<name>/report.md`；要再跑一個專案，回到 1 重來
 
 ### 節點流程（純線性）
 
 ```
-01 Form — Start                (觸發點，問 start)
+01 Form Trigger (pick project)    (Form 單頁；dropdown 選 project_name + 可選 scopesOverride)
   ↓
-02 Sheet — Read Rows           (讀 Google Sheet 'testing-pipeline-batch / Projects')
+02 Sheet — Read Selected Row      (用 filter project_name == {{ projectPick }} 只抓選中那列)
   ↓
-03 Build Options               (把 Sheet 列變成 dropdown options)
+03 Resolve + Precheck             (展開 scopes preset + 蒐集 warnings)
   ↓
-04 Form — Pick Project         (中間 Form, 選一個專案)
+04 Prepare Write Args             (組 base64 .env)
   ↓
-05 Resolve Pick → Row          (把選中字串拆回 row)
+05 Write testing.yml + .env       (write-project-config.sh)
   ↓
-06 Normalize Input             (組 schema + base64 .env + 展開 preset)
+06 Extract Path                   (從 stdout 撈 registry path, 順便精簡 JSON)
   ↓
-07 Precheck & Warning          (致命欄位缺 throw, 非致命記 warning)
+07 Register + write warnings      (register-project.sh + 寫 n8n-precheck-warnings.txt)
   ↓
-08 Write testing.yml + .env    (write-project-config.sh, 失敗→stopWorkflow)
+08 ~ 23                           (16 個測試節點，每個獨立執行：precheck / static / unit /
+                                   api-test / db-test / links / ssl / trivy / lighthouse /
+                                   e2e / visual / browser-compat / nuclei / security / stress / monkey)
   ↓
-09 Extract Registry Path       (從 08 stdout 撈 registry path)
+24 Summary Scorecard              (summarize.js --json)
   ↓
-10 Register Project            (register-project.sh, 失敗→stopWorkflow)
-  ↓
-11 Run Tests                   (run-project.sh <name> <scopes_csv>, timeout 60 分鐘)
-  ↓
-12 Generate Scorecard          (summarize.js --json)
-  ↓
-13 Parse Results               (解析 JSON、合併 warnings、算 overallScore)
+25 Parse Results                  (解析 JSON、合併 warnings、算 overallScore)
   (end)
 ```
 
@@ -180,18 +175,19 @@ Sheet 規範與欄位見 [google-sheets-schema.md](./google-sheets-schema.md)。
 
 - **純線性、不循環、不岔路**：每次 Execute 跑一個專案；想跑 N 個就 Execute N 次
 - **失敗 surface 到 executions**：所有失敗在 n8n Executions 列表呈現，不寄信
-- **關鍵步驟 stopWorkflow**：08 寫設定失敗、10 註冊失敗會直接停（避免 11 在錯資料上跑）；11 Run Tests 和 12 Scorecard 用 `continueRegularOutput` 容忍部分測試失敗
-- **警告不致命**：07 Precheck 僅在 `projectName` / `targetUrl` 空時 throw；其他缺欄位只記 warning 並從 scope list 移除對應測試
+- **關鍵步驟 stopWorkflow**：05 寫設定失敗、07 註冊失敗會直接停（避免下游在錯資料上跑）；08~23 測試節點和 24 Scorecard 用 `continueRegularOutput` 容忍部分測試失敗
+- **警告不致命**：03 Precheck 僅在 `project_name` / `target_url` 空時 throw；其他缺欄位只記 warning 並從 scope list 移除對應測試
 - **多身分迴圈在 bash 內**：`run-project.sh` 內部對 `api-test` / `auth-test` 會把 `ADMIN_*` / `USER1_*..USER5_*` 各跑一輪，產生 `newman-junit-<id>.xml`；其他測試（ssl/security/nuclei/stress/lighthouse/...）一律跑一次
 - **ephemeral 模式**：`local_path` 空或不存在時，`write-project-config.sh` 會寫到 `<pipeline>/.testing/ephemeral/<name>/`，pipeline 能對純網域站（無本地原始碼）跑測試
+- **單頁 Form + Sheet Filter 架構**：01 Form 的 `projectPick` dropdown 選項**寫死**在 workflow JSON 裡（不動態讀 Sheet），02 Sheet 用 `filtersUI` 把 `project_name` 比對 `{{ projectPick }}` 只讀選中那列。這個設計是因為 n8n `formTrigger` 在 Form 渲染前無法先讀 Sheet；試過「多頁 Form（Trigger→Sheet→Code→Form）」但 n8n GUI 會把多頁欄位合併顯示、動態 `fieldOptions` 拿不到資料。代價：**新增 Sheet 列時要同步改 01 節點的 `fieldOptions.values`**。
 
 ### 首次設定
 
 匯入 workflow 後，需要在 n8n GUI 做**一件事**才能實際跑：
 
-1. **綁 Google Sheets credential**：打開 `02 Sheet — Read Rows` 節點 → Credentials → 新增 Google Sheets OAuth → 授權你的 Google 帳號
+1. **綁 Google Sheets credential**：打開 `02 Sheet — Read Selected Row` 節點 → Credentials → 新增 Google Sheets OAuth → 授權你的 Google 帳號
 
-Sheet ID / 分頁簽名都已經寫死在 workflow JSON 裡（檔案 `n8n/workflows/pipeline-skeleton.json` 的 `02 Sheet — Read Rows` 節點），`docker exec n8n n8n import:workflow` 會保留這些值，**不會被清掉**。
+Sheet ID / 分頁簽名都已經寫死在 workflow JSON 裡（檔案 `n8n/workflows/pipeline-skeleton.json` 的 `02 Sheet — Read Selected Row` 節點），`docker exec n8n n8n import:workflow` 會保留這些值，**不會被清掉**。
 
 目前寫死的設定：
 - `documentId`: `11e25lFuf-CtztktJh4pvOaOcB_CQgilLaU6WtEoOeao`（testing-pipeline-batch Sheet；注意第 4 個字元是小寫 L 不是大寫 I）
@@ -201,8 +197,8 @@ Sheet 建立：檔名 `testing-pipeline-batch`，首個 tab 保留預設 `Sheet1
 
 ### 換不同的 Sheet / tab
 
-1. **方法 A（推薦）**：直接改 `n8n/workflows/pipeline-skeleton.json` 的 `02 Sheet — Read Rows` 節點的 `documentId.value` 和 `sheetName.value`，重匯入，保證下次重啟也不會歸零
-2. **方法 B（臨時用）**：在 n8n GUI 雙擊 `02 Sheet — Read Rows` 改 Document / Sheet 欄位；**但下次執行 `docker exec n8n n8n import:workflow` 會被 JSON 覆寫**，要保留請同步改 JSON
+1. **方法 A（推薦）**：直接改 `n8n/workflows/pipeline-skeleton.json` 的 `02 Sheet — Read Selected Row` 節點的 `documentId.value` 和 `sheetName.value`，重匯入，保證下次重啟也不會歸零
+2. **方法 B（臨時用）**：在 n8n GUI 雙擊 `02 Sheet — Read Selected Row` 改 Document / Sheet 欄位；**但下次執行 `docker exec n8n n8n import:workflow` 會被 JSON 覆寫**，要保留請同步改 JSON
 
 匯入 workflow 的指令：
 
@@ -238,11 +234,14 @@ n8n 某些節點有**必填欄位**，漏填會在 GUI 顯示紅色三角警告�
 - ❌ 漏填 `options.respondWith` + `formSubmittedText` → GUI 噴紅三角、Execute 失敗
 - ❌ `operation: "completion"` 卻當中間 Form 用 → 送出後 workflow 停在這裡、下游不執行
 - ✅ 中間 Form 要用 `operation: "page"`
+- ❌ **`form` 節點前面用 `manualTrigger`** → 執行時噴 `An n8n Form Trigger node must be set up before this node`。n8n 的「多頁表單」流程強制要求起點是 `formTrigger`，`manualTrigger` 不被認可。
 
 #### `n8n-nodes-base.formTrigger` (起點 Form Trigger)
 
 - 只能當 workflow 起點，不能放中間
-- 若純粹「按鈕啟動」無需收集資料，用 `n8n-nodes-base.manualTrigger`（空參數即可），不要硬加沒意義的 dropdown
+- **若下游有 `form` 節點（多頁表單），起點一定要用 `formTrigger`**；用 `manualTrigger` 會在下游 form 節點噴「must be set up before this node」
+- **`formTrigger` 至少要有 1 個 field**（哪怕是假的佔位欄位）。若設 `formFields.values: []`，n8n GUI 會把 01 和下一個 `form` 節點的欄位合併在同一頁顯示，導致下游 `form` 節點動態 `fieldOptions: {{ $json.options }}` 拿不到資料（Sheet 還沒讀就渲染了）。
+- 實務做法：01 放一個單選 dropdown（如 `ready=start`）當佔位，讓 01 成為真正獨立的第一頁，下游 `form` 節點才會被當成第二頁、等 Sheet/Code 跑完後才渲染。
 
 #### `n8n-nodes-base.googleSheets` (typeVersion 4.5)
 
@@ -251,6 +250,11 @@ n8n 某些節點有**必填欄位**，漏填會在 GUI 顯示紅色三角警告�
 - `parameters.documentId`：`{ "__rl": true, "value": "...", "mode": "id" }`（**不是直接寫字串**，必須包 resourceLocator 物件）
 - `parameters.sheetName`：`{ "__rl": true, "value": "Sheet1", "mode": "name" }`（或 `"mode": "list"` + `value: gid`）
 - `credentials`：必須綁 Google Sheets OAuth credential，無法純 JSON 設定，**要在 GUI 點一次綁定**
+- **重要：每次跑 `n8n import:workflow` 重匯 JSON 後，credential 綁定會被清掉**（錯誤訊息：`Node does not have any credentials set`）。每次重匯後都要：
+  1. 開 `02 Sheet — Read Selected Row` 節點 → Credential 下拉選原本的 Google Sheets account
+  2. 按 **Execute step** 驗證能讀到資料
+  3. 右上角按 **Save** 儲存 workflow（不只是關視窗）
+- 這是 n8n 的設計限制（credential ID 存資料庫不存 JSON），所以迭代開發時改 JSON 後請預留這個手動步驟
 
 #### `n8n-nodes-base.executeCommand` (typeVersion 1)
 
