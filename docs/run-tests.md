@@ -129,37 +129,76 @@ Preset 會在執行前展開成具體 scope 清單，所以你在 log 會看到 
 
 ---
 
-## 3.3 批次執行：從 Google Sheets 讀一份清單
+## 3.3 手動觸發與批次執行（Google Sheets 驅動）
 
-除了 CLI 單次執行，`n8n/workflows/pipeline-skeleton.json`（通用模板 workflow）提供**雙入口**：
+`n8n/workflows/pipeline-skeleton.json`（通用模板 workflow）用 **Google Sheets 當唯一資料來源**，手動觸發和批次都走同一入口。
 
-- **Form Trigger**（單發）：在 n8n GUI 點 Execute → 填 Form 欄位 → 跑一次
-- **Google Sheets**（批次）：把 `00b` 節點換成 Google Sheets Read Rows → 每列一個專案 → `02 SplitInBatches (batchSize=1)` 逐一序列跑
+Sheet 規範與欄位見 [google-sheets-schema.md](./google-sheets-schema.md)。
 
-Sheet 欄位規範與範例見 [google-sheets-schema.md](./google-sheets-schema.md)。
+### 操作流程
 
-關鍵節點流程：
+1. 打開 http://localhost:5678，開啟 `Testing Pipeline — Universal Template`
+2. 點右上 **Execute workflow**
+3. 第一張 Form 出現：選 `batchMode`
+   - `single` — 跑單一專案（會跳下一張 Form 讓你從 dropdown 選）
+   - `batch-all-enabled` — 不跳第二張 Form，直接跑 Sheet 裡所有 `enabled=true` 的列
+4. 若選 `single`：第二張 Form 出現，dropdown 列出 Sheet 裡所有 `project_name — target_url`，選一個即可；`scopesOverride` / `notifyEmailOverride` 留空就用 Sheet 裡的值
+5. 送出後 workflow 開始跑，n8n executions 頁面可以即時看進度
+6. 跑完會產 `reports/<name>/report.md`；若 pipeline `.env` 設了 `BATCH_NOTIFY_EMAIL`，批次結束會寄一封總結信
+
+### 節點流程
 
 ```
-00a Form Trigger            ─┐
-00b Google Sheets Read Rows ─┤→ 01 Normalize Input → 01.5 Filter enabled
-                             │    → 02 SplitInBatches (batchSize=1)
-                             │       → 03 Precheck & Warning
-                             │       → 04 write-project-config.sh (動態寫 testing.yml + .env)
-                             │       → 05 register-project.sh
-                             │       → 06 run-project.sh <name> <scopes_csv>
-                             │       → 07 summarize.js --json
-                             │       → 08 Parse Results
-                             │       → 09 IF notifyEmail 非空 + 需通知 → 10 Send Email (該列)
-                             │    (SplitInBatches done)
-                             └→ 11 Aggregate Batch Summary → 12 Send Batch Summary Email (env.BATCH_NOTIFY_EMAIL)
+00 Form — Start (batchMode)
+  ↓
+01 Sheet — Read Rows  (讀 Google Sheet 'testing-pipeline-batch' tab 'Projects')
+  ↓
+02 Branch — picker or batch  (batchMode=single 組 dropdown options；否則 bypass)
+  ↓
+02b IF picker mode?
+  ├─ true  → 03 Form — Pick Project (中間 Form, dropdown from options)
+  │         → 04 Resolve Pick → Row (把選到的 project_name 拆出 row)
+  │         → 05 Normalize Input
+  └─ false → 05 Normalize Input (直接把 Sheet 全 enabled 列當 items)
+  ↓
+06 SplitInBatches (batchSize=1)  ←───────────────┐ 迴圈回連
+  ↓ loop                                         │
+07 Precheck & Warning (致命 throw, 非致命記 warning)
+  ↓
+08 Write testing.yml + .env  (write-project-config.sh)
+  ↓
+09 Extract Registry Path
+  ↓
+10 Register Project  (register-project.sh)
+  ↓
+11 Run Tests (scopes CSV)  (run-project.sh <name> <scopes_csv>, timeout 60min)
+  ↓
+12 Generate Scorecard (--json)  (summarize.js --json)
+  ↓
+13 Parse Results  ─────────────────────────────────┘
+  ↓ done
+14 Aggregate Batch Summary
+  ↓
+15 IF BATCH_NOTIFY_EMAIL set
+  ↓
+16 Send Batch Summary Email
 ```
 
-特點：
+### 設計要點
+
+- **失敗在 n8n executions 列表呈現**，不寄 row-level email。若要被動通知才設 `BATCH_NOTIFY_EMAIL`，只在整批跑完後寄一次
 - **逐一序列**：`batchSize=1` 避免 Docker 資源搶佔和目標站壓力堆疊
-- **警告不致命**：03 Precheck 僅在 `projectName` / `targetUrl` 空時 throw；其他缺欄位只記 warning 並 skip 相關 scope
-- **ephemeral 模式**：`localPath` 空或不存在時，`write-project-config.sh` 會寫到 `<pipeline>/.testing/ephemeral/<name>/`，`register-project.sh` 指向該路徑
-- **批次總結**：全部跑完後寄一封總結到 `$env.BATCH_NOTIFY_EMAIL`（在 pipeline 的 `.env` 設定）
+- **警告不致命**：07 Precheck 僅在 `projectName` / `targetUrl` 空時 throw；其他缺欄位只記 warning 並 skip 相關 scope
+- **多身分迴圈在 bash 內**：`run-project.sh` 內部對 `api-test` / `auth-test` 會把 `ADMIN_*` / `USER1_*..USER5_*` 各跑一輪，產生 `newman-junit-<id>.xml`；其他測試（ssl/security/nuclei/stress/lighthouse/...）一律跑一次
+- **ephemeral 模式**：`local_path` 空或不存在時，`write-project-config.sh` 會寫到 `<pipeline>/.testing/ephemeral/<name>/`，pipeline 能對純網域站（無本地原始碼）跑測試
+
+### 首次設定
+
+匯入 workflow 後，需要在 n8n GUI 做三件事才能實際跑：
+
+1. **綁 Google Sheets credential**：打開 `01 Sheet — Read Rows` 節點 → Credentials → 新增 Google Sheets OAuth → 授權
+2. **設定 documentId**：同節點內，把 `CHANGE_ME_SHEET_ID` 換成你的 Sheet ID（URL 中 `/d/` 和 `/edit` 之間那段）
+3. **綁 SMTP credential（選配）**：打開 `16 Send Batch Summary Email` → Credentials → 新增 SMTP credential；pipeline 的 `.env` 加 `BATCH_NOTIFY_EMAIL=你的信箱` 和 `SMTP_FROM=`，重啟 n8n 讓 env 生效
 
 匯入 workflow：
 

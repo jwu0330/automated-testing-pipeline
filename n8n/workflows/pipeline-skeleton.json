@@ -1,94 +1,72 @@
 {
   "id": "oNnWI3Ohcxh0ptqX",
   "name": "Testing Pipeline — Universal Template",
-  "description": "通用性測試模板：Form Trigger（手動+選擇題）或 Google Sheets（批次）→ SplitInBatches 逐一序列 → Precheck（警告後繼續）→ 動態寫 testing.yml/.env → Register → run-project.sh <name> <scopes> → Parse → 該列通知 → 批次總結 email。",
+  "description": "通用性測試模板：Form Trigger → 從 Google Sheet 讀清單 → Form 2 選專案 → 讀該列資料 → 正規化 → Precheck（警告後繼續）→ 動態寫 testing.yml/.env → Register → run-project.sh <name> <scopes> → summarize → 批次總結 email。失敗直接在 n8n executions 列出，不寄 row-level email。",
   "active": true,
   "nodes": [
     {
       "parameters": {
-        "formTitle": "Testing Pipeline — Run Project",
-        "formDescription": "提供網站資訊並選擇要跑的測試項目。multi-select 可勾多個；preset（ALL/REMOTE_ONLY/LOCAL_ONLY）會自動展開。",
+        "formTitle": "Testing Pipeline — Pick a Project",
+        "formDescription": "點 Submit 後會從 Google Sheet 讀取所有專案，下一頁會有一個下拉選單讓你挑要跑哪一個。",
         "formFields": {
           "values": [
-            { "fieldLabel": "projectName", "placeholder": "英數底線，例：babydodofun", "requiredField": true },
-            { "fieldLabel": "targetUrl", "placeholder": "https://example.com", "requiredField": true },
-            { "fieldLabel": "localPath", "placeholder": "絕對路徑；留空 → 純 URL 測試（skip static/unit/trivy/db-test）", "requiredField": false },
             {
-              "fieldLabel": "phpVersion",
+              "fieldLabel": "batchMode",
               "fieldType": "dropdown",
               "fieldOptions": {
                 "values": [
-                  { "option": "7.4" }, { "option": "8.0" }, { "option": "8.1" }, { "option": "8.2" }, { "option": "8.3" }
-                ]
-              },
-              "requiredField": false
-            },
-            {
-              "fieldLabel": "scopes",
-              "fieldType": "dropdown",
-              "multiselect": true,
-              "fieldOptions": {
-                "values": [
-                  { "option": "ALL" },
-                  { "option": "REMOTE_ONLY" },
-                  { "option": "LOCAL_ONLY" },
-                  { "option": "precheck" },
-                  { "option": "static" },
-                  { "option": "unit" },
-                  { "option": "api-test" },
-                  { "option": "auth-test" },
-                  { "option": "db-test" },
-                  { "option": "ssl" },
-                  { "option": "security" },
-                  { "option": "nuclei" },
-                  { "option": "trivy" },
-                  { "option": "stress" },
-                  { "option": "e2e" },
-                  { "option": "visual-test" },
-                  { "option": "browser-compat" },
-                  { "option": "lighthouse" },
-                  { "option": "links" },
-                  { "option": "monkey" }
+                  { "option": "single" },
+                  { "option": "batch-all-enabled" }
                 ]
               },
               "requiredField": true
-            },
-            { "fieldLabel": "adminUsername", "placeholder": "留空 → skip api-test/auth-test", "requiredField": false },
-            { "fieldLabel": "adminPassword", "fieldType": "password", "requiredField": false },
-            { "fieldLabel": "e2eUsername", "placeholder": "給 Playwright E2E 用", "requiredField": false },
-            { "fieldLabel": "e2ePassword", "fieldType": "password", "requiredField": false },
-            { "fieldLabel": "notifyEmail", "fieldType": "email", "placeholder": "失敗才寄；留空不通知", "requiredField": false }
+            }
           ]
         },
         "options": {}
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f001",
-      "name": "00a Form Trigger — Manual",
+      "id": "tp-form-00-start",
+      "name": "00 Form — Start",
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.2,
-      "position": [200, -300],
-      "notes": "手動觸發入口。scopes 為 multiSelect；USER1~5 多身分不在 Form 支援，請改走 Google Sheets。"
-    },
-    {
-      "parameters": {},
-      "id": "tp-00000000-0000-0000-0000-00000000f002",
-      "name": "00b Google Sheets Trigger (stub)",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [200, -50],
-      "notes": "批次入口 stub：請在 n8n GUI 把此節點換成 Google Sheets (Read Rows) 節點；\n建議 Sheet 欄位見 docs/google-sheets-schema.md。\n輸出每列一個 item，會走 01 Normalize 正規化。"
+      "position": [0, 0],
+      "notes": "single = 第二張 Form 跳出單一專案選單；batch-all-enabled = 跳過選單直接跑 Sheet 裡 enabled=true 的全部列。"
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// 01 Normalize — 把 Form 單筆 / Sheets 多筆統一成同一 JSON schema\n// 正規化後 schema：\n//   { projectName, targetUrl, localPath, phpVersion, scopes[], credentials{...}, notifyEmail, warnings[] }\n\nconst src = $json;\n\n// multiSelect 在 Form 可能是陣列或逗號分隔字串；Sheets 一定是字串\nfunction parseScopes(raw) {\n  if (Array.isArray(raw)) return raw;\n  if (!raw) return [];\n  return String(raw).split(',').map(s => s.trim()).filter(Boolean);\n}\n\nconst ALL = ['precheck','static','unit','api-test','db-test','links','ssl','trivy','lighthouse','e2e','nuclei','security','stress','monkey','summary'];\nconst REMOTE = ['precheck','ssl','security','nuclei','stress','lighthouse','links','monkey','summary'];\nconst LOCAL  = ['static','unit','trivy','db-test','summary'];\n\nfunction expandPresets(list) {\n  const out = new Set();\n  for (const s of list) {\n    if (s === 'ALL' || s === 'all') ALL.forEach(x => out.add(x));\n    else if (s === 'REMOTE_ONLY' || s === 'remote-only') REMOTE.forEach(x => out.add(x));\n    else if (s === 'LOCAL_ONLY' || s === 'local-only') LOCAL.forEach(x => out.add(x));\n    else out.add(s);\n  }\n  return [...out];\n}\n\nconst scopes = expandPresets(parseScopes(src.scopes));\n\n// 組 .env 內容（給 write-project-config.sh 的 env_b64）\nconst envLines = [];\nif (src.adminUsername || src.admin_username) envLines.push(`ADMIN_USERNAME=${src.adminUsername || src.admin_username}`);\nif (src.adminPassword || src.admin_password) envLines.push(`ADMIN_PASSWORD=${src.adminPassword || src.admin_password}`);\nif (src.e2eUsername || src.e2e_username) envLines.push(`E2E_USERNAME=${src.e2eUsername || src.e2e_username}`);\nif (src.e2ePassword || src.e2e_password) envLines.push(`E2E_PASSWORD=${src.e2ePassword || src.e2e_password}`);\n// Sheets 多身分（USER1~USER5）\nfor (let i = 1; i <= 5; i++) {\n  const u = src[`user${i}_username`];\n  const p = src[`user${i}_password`];\n  const l = src[`user${i}_label`];\n  if (u) envLines.push(`USER${i}_USERNAME=${u}`);\n  if (p) envLines.push(`USER${i}_PASSWORD=${p}`);\n  if (l) envLines.push(`USER${i}_LABEL=${l}`);\n}\n\nconst envContent = envLines.join('\\n') + (envLines.length ? '\\n' : '');\nconst envB64 = Buffer.from(envContent, 'utf-8').toString('base64');\n\nreturn {\n  projectName: (src.projectName || src.project_name || '').trim(),\n  targetUrl: (src.targetUrl || src.target_url || '').trim(),\n  localPath: (src.localPath || src.local_path || '').trim(),\n  phpVersion: (src.phpVersion || src.php_version || '8.1').trim(),\n  scopes,\n  scopesCsv: scopes.join(','),\n  envB64,\n  notifyEmail: (src.notifyEmail || src.notify_email || '').trim(),\n  enabled: src.enabled === undefined || src.enabled === '' || String(src.enabled).toLowerCase() === 'true',\n  warnings: []\n};"
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "CHANGE_ME_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Projects",
+          "mode": "name"
+        },
+        "options": {}
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f010",
-      "name": "01 Normalize Input",
+      "id": "tp-sheet-01-read",
+      "name": "01 Sheet — Read Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [250, 0],
+      "notes": "讀 Google Sheet '禁 testing-pipeline-batch / tab Projects' 全部列。在 n8n GUI 綁 Google Sheets OAuth credential，並把 documentId 改成你的 Sheet ID。欄位規範見 docs/google-sheets-schema.md。",
+      "credentials": {},
+      "onError": "stopWorkflow"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Decision：batchMode=single 走 Form 2；batchMode=batch-all-enabled 直接全跑\nconst rows = $input.all().map(i => i.json);\nconst mode = $('00 Form — Start').first().json.batchMode;\n\nif (mode === 'batch-all-enabled') {\n  // 直接把 Sheet 全部 enabled=true 的列 emit 出去，跳過 Form 2\n  const enabled = rows.filter(r => {\n    const v = String(r.enabled ?? 'true').toLowerCase();\n    return v === 'true' || v === '1' || v === 'yes' || v === '';\n  });\n  return enabled.map(r => ({ json: { ...r, __bypassPicker: true } }));\n}\n\n// single 模式：把所有 project_name 做成 options 傳給 Form 2\nconst options = rows\n  .filter(r => r.project_name)\n  .map(r => ({ option: `${r.project_name}  —  ${r.target_url || '(no url)'}` }));\n\n// 同時把整份 rows 也帶著，供 Form 2 後的節點用 project_name 反查\nreturn [{ json: { __pickerMode: true, options, allRows: rows } }];"
+      },
+      "id": "tp-02-branch",
+      "name": "02 Branch — picker or batch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [500, -175],
-      "notes": "把 Form 單筆和 Sheets 多筆統一成同一 schema；展開 preset；組 .env 成 base64 傳給下游。"
+      "position": [500, 0],
+      "notes": "根據 00 Form 的 batchMode 決定走單選 Form 2 還是直接全跑。"
     },
     {
       "parameters": {
@@ -96,8 +74,8 @@
           "options": { "caseSensitive": true, "typeValidation": "loose" },
           "conditions": [
             {
-              "id": "c-enabled",
-              "leftValue": "={{ $json.enabled }}",
+              "id": "c-picker",
+              "leftValue": "={{ $json.__pickerMode === true }}",
               "rightValue": true,
               "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
@@ -106,178 +84,184 @@
         },
         "options": {}
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f011",
-      "name": "01.5 Filter enabled",
+      "id": "tp-02b-if",
+      "name": "02b IF — picker mode?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [750, -175],
-      "notes": "Sheets enabled=false 的列跳過；Form 一律 enabled=true。"
+      "position": [750, 0],
+      "notes": "true → 走 Form 2；false → 直接進 SplitInBatches"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "formTitle": "Testing Pipeline — Pick Project",
+        "formDescription": "從 Sheet 讀到的專案清單。選一個、按 Submit 後開始跑。留空的欄位會沿用 Sheet 原值。",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "projectPick",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": "={{ $json.options }}"
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "scopesOverride",
+              "placeholder": "留空 = 用 Sheet 的 scopes；填了會覆寫（逗號分隔或 ALL/REMOTE_ONLY/LOCAL_ONLY）",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "notifyEmailOverride",
+              "fieldType": "email",
+              "placeholder": "留空 = 用 Sheet 的 notify_email",
+              "requiredField": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tp-03-form2",
+      "name": "03 Form — Pick Project",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [1000, -150],
+      "notes": "n8n 中間 Form 節點（不是 formTrigger）：可以在 workflow 中間顯示一張新 form。送出後回到後續節點。dropdown options 從上一步 02 Branch 傳進來的 options 陣列動態取。"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// 03 Form 送回的 projectPick 是 'project_name  —  target_url' 字串\n// 這裡拆出 project_name，從 allRows 找到那一列\nconst pick = $json.projectPick || '';\nconst projectName = pick.split('  —  ')[0].trim();\nconst scopesOverride = ($json.scopesOverride || '').trim();\nconst notifyOverride = ($json.notifyEmailOverride || '').trim();\n\nconst allRows = $('02 Branch — picker or batch').first().json.allRows || [];\nconst row = allRows.find(r => r.project_name === projectName);\nif (!row) {\n  throw new Error(`找不到 project_name=${projectName}（Sheet 可能在選的當下被改了）`);\n}\n\nconst out = { ...row };\nif (scopesOverride) out.scopes = scopesOverride;\nif (notifyOverride) out.notify_email = notifyOverride;\nreturn [{ json: out }];"
+      },
+      "id": "tp-04-pick",
+      "name": "04 Resolve Pick → Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, -150],
+      "notes": "把 dropdown 選的字串拆回 project_name，從 02 帶來的 allRows 撈那一列；若有 override 欄位則覆寫 scopes / notify_email。"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// 05 Normalize — 把 row 統一成 { projectName, targetUrl, localPath, phpVersion, scopes[], envB64, notifyEmail, warnings[] }\nconst src = $json;\n\nfunction parseScopes(raw) {\n  if (Array.isArray(raw)) return raw;\n  if (!raw) return [];\n  return String(raw).split(',').map(s => s.trim()).filter(Boolean);\n}\n\nconst ALL    = ['precheck','static','unit','api-test','db-test','links','ssl','trivy','lighthouse','e2e','nuclei','security','stress','monkey','summary'];\nconst REMOTE = ['precheck','ssl','security','nuclei','stress','lighthouse','links','monkey','summary'];\nconst LOCAL  = ['static','unit','trivy','db-test','summary'];\n\nfunction expandPresets(list) {\n  const out = new Set();\n  for (const s of list) {\n    if (s === 'ALL' || s === 'all') ALL.forEach(x => out.add(x));\n    else if (s === 'REMOTE_ONLY' || s === 'remote-only') REMOTE.forEach(x => out.add(x));\n    else if (s === 'LOCAL_ONLY' || s === 'local-only') LOCAL.forEach(x => out.add(x));\n    else out.add(s);\n  }\n  return [...out];\n}\n\nconst scopes = expandPresets(parseScopes(src.scopes));\n\n// 組 .env 內容（base64 給 write-project-config.sh）\nconst envLines = [];\nconst addIf = (key, val) => { if (val) envLines.push(`${key}=${val}`); };\naddIf('ADMIN_USERNAME', src.admin_username);\naddIf('ADMIN_PASSWORD', src.admin_password);\naddIf('E2E_USERNAME', src.e2e_username);\naddIf('E2E_PASSWORD', src.e2e_password);\nfor (let i = 1; i <= 5; i++) {\n  addIf(`USER${i}_USERNAME`, src[`user${i}_username`]);\n  addIf(`USER${i}_PASSWORD`, src[`user${i}_password`]);\n  addIf(`USER${i}_LABEL`,    src[`user${i}_label`]);\n}\nconst envContent = envLines.join('\\n') + (envLines.length ? '\\n' : '');\nconst envB64 = Buffer.from(envContent, 'utf-8').toString('base64');\n\nreturn {\n  projectName: (src.project_name || '').trim(),\n  targetUrl:   (src.target_url || '').trim(),\n  localPath:   (src.local_path || '').trim(),\n  phpVersion:  String(src.php_version || '8.1').trim(),\n  scopes,\n  scopesCsv:   scopes.join(','),\n  envB64,\n  notifyEmail: (src.notify_email || '').trim(),\n  warnings:    []\n};"
+      },
+      "id": "tp-05-normalize",
+      "name": "05 Normalize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 0],
+      "notes": "把 Sheet 一列資料統一成 pipeline 吃的 schema；展開 preset；組 base64 .env。"
     },
     {
       "parameters": {
         "batchSize": 1,
         "options": {}
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f020",
-      "name": "02 SplitInBatches (batchSize=1)",
+      "id": "tp-06-split",
+      "name": "06 SplitInBatches (batchSize=1)",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [1000, -175],
-      "notes": "逐一序列跑，避免 Docker 資源搶佔 / 目標站壓力。末節點連回此節點迭代。"
+      "position": [1750, 0],
+      "notes": "逐一序列跑。回連到此節點 = 進行下一列；done 出口 = 全部跑完"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// 03 Precheck & Warning — 必填檢查 + 非致命欄位缺失記 warning\n// 致命：projectName / targetUrl 空 → throw，該 item 失敗但 SplitInBatches 繼續下一 item\n// 非致命：local_path / 帳密 缺 → append warning，相關 scope 從 list 移除\n\nconst d = $json;\nconst warnings = [];\n\n// 致命\nif (!d.projectName) throw new Error('❌ project_name 未提供，整列拒絕');\nif (!d.targetUrl) throw new Error('❌ target_url 未提供，整列拒絕');\n\n// 非致命\nconst scopes = new Set(d.scopes || []);\n\n// local_path 檢查：n8n 在容器內可能看不到宿主路徑，這裡只檢查字串是否提供\n// 真實的目錄存在檢查由 write-project-config.sh + run-project.sh 負責，也會再 append warning\nif (!d.localPath) {\n  warnings.push('⚠ local_path 未設 → 將跳過 static/unit/trivy/db-test');\n  ['static','unit','trivy','db-test'].forEach(s => scopes.delete(s));\n}\n\n// target_url 非 https → skip ssl\nif (!d.targetUrl.startsWith('https://')) {\n  if (scopes.has('ssl')) {\n    warnings.push('⚠ target_url 非 https → 跳過 SSL 掃描');\n    scopes.delete('ssl');\n  }\n}\n\n// admin 帳密檢查（給 api-test / auth-test）\nconst hasAdmin = d.envB64 && Buffer.from(d.envB64, 'base64').toString('utf-8').match(/ADMIN_USERNAME=\\S/);\nif (!hasAdmin) {\n  if (scopes.has('api-test') || scopes.has('auth-test')) {\n    warnings.push('⚠ 未提供 admin 帳密 → API/Auth 測試會 skip');\n    // 不強制移除 scope（讓 run-project.sh 自己處理，也會記 warning）\n  }\n}\n\n// e2e 帳密（非致命，降級為未登入）\nconst hasE2e = d.envB64 && Buffer.from(d.envB64, 'base64').toString('utf-8').match(/E2E_USERNAME=\\S/);\nif (!hasE2e && scopes.has('e2e')) {\n  warnings.push('⚠ 未提供 E2E 帳密 → e2e 將只跑公開頁面');\n}\n\nconst finalScopes = [...scopes];\n\nreturn {\n  ...d,\n  scopes: finalScopes,\n  scopesCsv: finalScopes.join(','),\n  warnings: [...(d.warnings || []), ...warnings]\n};"
+        "jsCode": "// 07 Precheck — 必填檢查 + 非致命欄位缺失記 warning\nconst d = $json;\nconst warnings = [];\n\nif (!d.projectName) throw new Error('❌ project_name 未提供');\nif (!d.targetUrl)   throw new Error('❌ target_url 未提供');\n\nconst scopes = new Set(d.scopes || []);\n\nif (!d.localPath) {\n  warnings.push('⚠ local_path 未設 → 將跳過 static/unit/trivy/db-test');\n  ['static','unit','trivy','db-test'].forEach(s => scopes.delete(s));\n}\nif (!d.targetUrl.startsWith('https://') && scopes.has('ssl')) {\n  warnings.push('⚠ target_url 非 https → 跳過 SSL 掃描');\n  scopes.delete('ssl');\n}\n\nconst envContent = d.envB64 ? Buffer.from(d.envB64, 'base64').toString('utf-8') : '';\nif (!/ADMIN_USERNAME=\\S/.test(envContent) && (scopes.has('api-test') || scopes.has('auth-test'))) {\n  warnings.push('⚠ 未提供 admin 帳密 → API/Auth 測試會 skip');\n}\nif (!/E2E_USERNAME=\\S/.test(envContent) && scopes.has('e2e')) {\n  warnings.push('⚠ 未提供 E2E 帳密 → e2e 只跑公開頁面');\n}\n\nconst finalScopes = [...scopes];\nreturn {\n  ...d,\n  scopes: finalScopes,\n  scopesCsv: finalScopes.join(','),\n  warnings: [...(d.warnings || []), ...warnings]\n};"
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f030",
-      "name": "03 Precheck & Warning",
+      "id": "tp-07-precheck",
+      "name": "07 Precheck & Warning",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1250, -175],
-      "notes": "致命欄位缺 throw（該 item 失敗但批次繼續）；非致命 append warning 並移除對應 scope。\nwarnings 陣列會一路帶到 04 當 n8n-precheck-warnings 傳入 run-project.sh，最後併入 warnings.txt。"
+      "position": [2000, 0],
+      "notes": "致命欄位缺 → throw（該 item 失敗，n8n executions 列表會標紅，但 SplitInBatches 會繼續下一列）。非致命 → 記 warning + 移除對應 scope。"
     },
     {
       "parameters": {
         "command": "=bash scripts/write-project-config.sh {{ JSON.stringify($json.projectName) }} {{ JSON.stringify($json.localPath) }} {{ JSON.stringify($json.targetUrl) }} {{ JSON.stringify($json.phpVersion) }} {{ JSON.stringify($json.envB64) }}"
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f040",
-      "name": "04 Write testing.yml + .env",
+      "id": "tp-08-write",
+      "name": "08 Write testing.yml + .env",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [1500, -175],
-      "onError": "stopWorkflow",
+      "position": [2250, 0],
+      "onError": "continueErrorOutput",
       "notes": "動態寫 <local_path>/.testing/testing.yml + .env；local_path 空或不存在會寫到 $ROOT/.testing/ephemeral/<name>/。stdout 最後一行是 registry path。"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// 從 04 stdout 最後一行取 registry path（write-project-config.sh 最後一行輸出）\nconst lines = ($json.stdout || '').trim().split('\\n').filter(Boolean);\nconst registryPath = lines[lines.length - 1] || '';\nif (!registryPath) throw new Error('write-project-config.sh 未回傳 registry path');\n// 把原本 03 的資料合回來（SplitInBatches + executeCommand 會只剩 stdout）\nconst upstream = $('03 Precheck & Warning').itemMatching($itemIndex).json;\nreturn { ...upstream, registryPath };"
+        "jsCode": "// 09 Extract registry path + pass-through item（合併舊 04.5 + 05.5）\nconst lines = ($json.stdout || '').trim().split('\\n').filter(Boolean);\nconst registryPath = lines[lines.length - 1] || '';\nif (!registryPath) throw new Error('write-project-config.sh 未回傳 registry path');\nconst upstream = $('07 Precheck & Warning').itemMatching($itemIndex).json;\nreturn { ...upstream, registryPath };"
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f041",
-      "name": "04.5 Extract Registry Path",
+      "id": "tp-09-extract",
+      "name": "09 Extract Registry Path",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1750, -175],
-      "notes": "從 04 stdout 拿 registry path，合回 03 的完整 item。"
+      "position": [2500, 0],
+      "notes": "從 08 stdout 拿 registry path，合回 07 的完整 item。"
     },
     {
       "parameters": {
         "command": "=bash scripts/register-project.sh {{ JSON.stringify($json.projectName) }} {{ JSON.stringify($json.registryPath) }}"
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f050",
-      "name": "05 Register Project",
+      "id": "tp-10-register",
+      "name": "10 Register Project",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [2000, -175],
+      "position": [2750, 0],
       "onError": "continueRegularOutput",
       "notes": "idempotent：同名會覆寫 registry 內的 path。"
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// 05 後把 n8n precheck warnings 先寫入 reports/<name>/warnings.txt\n// run-project.sh 結束時會 append 自己的 warning，但會覆寫——\n// 所以這裡改用 mkdir 建立 reports 目錄，n8n warnings 透過環境變數帶給 06，由 run-project.sh 合併\nconst upstream = $('04.5 Extract Registry Path').itemMatching($itemIndex).json;\nreturn upstream;"
+        "command": "=mkdir -p reports/{{ $json.projectName }} && printf '%s\\n' {{ JSON.stringify(($json.warnings || []).join('\\n')) }} > reports/{{ $json.projectName }}/n8n-precheck-warnings.txt && bash scripts/run-project.sh {{ JSON.stringify($json.projectName) }} {{ JSON.stringify($json.scopesCsv || 'all') }}",
+        "options": {
+          "executionTimeout": 3600000
+        }
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f055",
-      "name": "05.5 Pass-through",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [2250, -175],
-      "notes": "把 04.5 的完整 item 帶到 06。"
-    },
-    {
-      "parameters": {
-        "command": "=mkdir -p reports/{{ $json.projectName }} && printf '%s\\n' {{ JSON.stringify(($json.warnings || []).join('\\n')) }} > reports/{{ $json.projectName }}/n8n-precheck-warnings.txt && bash scripts/run-project.sh {{ JSON.stringify($json.projectName) }} {{ JSON.stringify($json.scopesCsv || 'all') }}"
-      },
-      "id": "tp-00000000-0000-0000-0000-00000000f060",
-      "name": "06 Run Tests (scopes CSV)",
+      "id": "tp-11-run",
+      "name": "11 Run Tests (scopes CSV)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [2500, -175],
+      "position": [3000, 0],
       "onError": "continueRegularOutput",
-      "notes": "寫 n8n-precheck-warnings.txt + 呼叫 run-project.sh <name> <scopes CSV>；\nrun-project.sh 結束會寫 reports/<name>/warnings.txt；Parse 節點會同時讀這兩個檔。"
+      "notes": "寫 n8n-precheck-warnings.txt + 呼叫 run-project.sh <name> <scopes CSV>。timeout 60 分鐘（ALL preset 可能跑 20-40 分鐘，視專案大小）。身分迴圈在 run-project.sh 內處理（api-test / auth-test 會對 ADMIN+USER1~5 各跑一輪）。"
     },
     {
       "parameters": {
         "command": "=node scripts/summarize.js {{ JSON.stringify($json.projectName) }} --json"
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f070",
-      "name": "07 Generate Scorecard (--json)",
+      "id": "tp-12-scorecard",
+      "name": "12 Generate Scorecard (--json)",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [2750, -175],
+      "position": [3250, 0],
       "onError": "continueRegularOutput",
-      "notes": "即使 06 已經跑過 summary，為了拿結構化 JSON 再跑一次 --json。"
+      "notes": "summarize.js --json → stdout 含 warnings 陣列、各測試結構化結果。"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// 08 Parse Results — 解析 07 的 JSON stdout，合併 06 pre-existing warnings\nconst upstream = $('05.5 Pass-through').itemMatching($itemIndex).json;\nlet parsed = {};\ntry {\n  parsed = JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    projectName: upstream.projectName,\n    notifyEmail: upstream.notifyEmail,\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    warnings: upstream.warnings || []\n  };\n}\n// parsed.warnings 已含 run-project.sh 寫的 warnings.txt 內容；再加 n8n 階段的 warnings（若還沒進檔）\nconst mergedWarnings = [...new Set([...(parsed.warnings || []), ...(upstream.warnings || [])])];\n// overallScore：用 lighthouse.avg.performance 或 lighthouse perf 作為代理；若沒則 null\nconst overallScore = parsed.lighthouse?.avg?.performance ?? null;\nreturn {\n  ...parsed,\n  projectName: upstream.projectName,\n  notifyEmail: upstream.notifyEmail,\n  overallScore,\n  warnings: mergedWarnings\n};"
+        "jsCode": "// 13 Parse Results — 解析 12 的 JSON stdout\nconst upstream = $('09 Extract Registry Path').itemMatching($itemIndex).json;\nlet parsed = {};\ntry {\n  parsed = JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    projectName: upstream.projectName,\n    notifyEmail: upstream.notifyEmail,\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    warnings: upstream.warnings || []\n  };\n}\nconst mergedWarnings = [...new Set([...(parsed.warnings || []), ...(upstream.warnings || [])])];\nconst overallScore = parsed.lighthouse?.avg?.performance ?? null;\nreturn {\n  ...parsed,\n  projectName: upstream.projectName,\n  notifyEmail: upstream.notifyEmail,\n  overallScore,\n  warnings: mergedWarnings\n};"
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f080",
-      "name": "08 Parse Results",
+      "id": "tp-13-parse",
+      "name": "13 Parse Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3000, -175],
-      "notes": "合併 warnings 來源；附上 projectName / notifyEmail；挑 lighthouse perf 當 overallScore 代理。"
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "typeValidation": "loose" },
-          "conditions": [
-            {
-              "id": "cond-email",
-              "leftValue": "={{ $json.notifyEmail }}",
-              "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
-            },
-            {
-              "id": "cond-should",
-              "leftValue": "={{ !!$json.parseError || (typeof $json.overallScore === 'number' && $json.overallScore < 80) || ($json.warnings && $json.warnings.length > 0) }}",
-              "rightValue": true,
-              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "tp-00000000-0000-0000-0000-00000000f090",
-      "name": "09 IF Should Notify (row)",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [3250, -175],
-      "notes": "該列 notify_email 非空 AND (parseError | score<80 | warnings)"
-    },
-    {
-      "parameters": {
-        "fromEmail": "={{ $env.SMTP_FROM || 'pipeline@localhost' }}",
-        "toEmail": "={{ $json.notifyEmail }}",
-        "subject": "=[Testing Pipeline] {{ $json.projectName }}：{{ $json.parseError ? 'parse error' : ($json.warnings.length + ' 條警告 · score ' + ($json.overallScore ?? 'N/A')) }}",
-        "emailFormat": "text",
-        "text": "=專案：{{ $json.projectName }}\n時間：{{ $now.toISO() }}\n總分：{{ $json.overallScore ?? 'N/A' }}\n\n前置檢查警告（{{ $json.warnings.length }} 條）：\n{{ ($json.warnings || []).map(w => '- ' + w).join('\\n') }}\n\n詳情（JSON 摘要）：\n{{ JSON.stringify({ssl:$json.ssl, static:$json.static, security:$json.security, stress:$json.stress, unit:$json.unit, e2e:$json.e2e, nuclei:$json.nuclei, lighthouse:$json.lighthouse?.avg, monkey:$json.monkey, trivy:$json.trivy, links:$json.links}, null, 2) }}",
-        "options": {}
-      },
-      "id": "tp-00000000-0000-0000-0000-00000000f100",
-      "name": "10 Send Email (row)",
-      "type": "n8n-nodes-base.emailSend",
-      "typeVersion": 2.1,
-      "position": [3500, -275],
-      "onError": "continueRegularOutput",
-      "notes": "SMTP credential 在 n8n GUI > Credentials 綁定。"
+      "position": [3500, 0],
+      "notes": "合併 warnings；overallScore 取 lighthouse perf 代理。"
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// 11 Aggregate Batch Summary — SplitInBatches 完成後收集所有 item 的解析結果\nconst items = $input.all().map(i => i.json);\nconst rows = items.map(r => ({\n  projectName: r.projectName || '(unknown)',\n  overallScore: r.overallScore ?? 'N/A',\n  warningsCount: (r.warnings || []).length,\n  parseError: r.parseError || '',\n  reportPath: r.reports_dir ? `${r.reports_dir}/report.md` : ''\n}));\n\nconst md = [\n  '# 批次測試總結',\n  '',\n  `執行時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`,\n  `共 ${rows.length} 個專案`,\n  '',\n  '| 專案 | overallScore | warnings | 報告 |',\n  '|---|---|---|---|',\n  ...rows.map(r => `| ${r.projectName} | ${r.overallScore} | ${r.warningsCount} | ${r.reportPath} |`)\n].join('\\n');\n\nreturn { batchSummary: md, rows, total: rows.length };"
+        "jsCode": "// 14 Aggregate Batch Summary — SplitInBatches done 後彙整所有 item\nconst items = $input.all().map(i => i.json);\nconst rows = items.map(r => ({\n  projectName: r.projectName || '(unknown)',\n  overallScore: r.overallScore ?? 'N/A',\n  warningsCount: (r.warnings || []).length,\n  parseError: r.parseError || '',\n  reportPath: r.reports_dir ? `${r.reports_dir}/report.md` : ''\n}));\n\nconst md = [\n  '# 批次測試總結',\n  '',\n  `執行時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`,\n  `共 ${rows.length} 個專案`,\n  '',\n  '| 專案 | overallScore | warnings | 報告 |',\n  '|---|---|---|---|',\n  ...rows.map(r => `| ${r.projectName} | ${r.overallScore} | ${r.warningsCount} | ${r.reportPath} |`)\n].join('\\n');\n\nreturn { batchSummary: md, rows, total: rows.length };"
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f110",
-      "name": "11 Aggregate Batch Summary",
+      "id": "tp-14-agg",
+      "name": "14 Aggregate Batch Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3750, 50],
-      "notes": "SplitInBatches 'done' 分支流進來；收集所有 row 的解析結果。"
+      "position": [2000, 300],
+      "notes": "SplitInBatches done 分支流進來。"
     },
     {
       "parameters": {
@@ -285,7 +269,7 @@
           "options": { "caseSensitive": true, "typeValidation": "loose" },
           "conditions": [
             {
-              "id": "cond-batch",
+              "id": "cond-batch-email",
               "leftValue": "={{ $env.BATCH_NOTIFY_EMAIL }}",
               "rightValue": "",
               "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
@@ -295,11 +279,11 @@
         },
         "options": {}
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f115",
-      "name": "11.5 IF BATCH_NOTIFY_EMAIL set",
+      "id": "tp-15-if-env",
+      "name": "15 IF BATCH_NOTIFY_EMAIL set",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [4000, 50]
+      "position": [2250, 300]
     },
     {
       "parameters": {
@@ -310,76 +294,73 @@
         "text": "={{ $json.batchSummary }}",
         "options": {}
       },
-      "id": "tp-00000000-0000-0000-0000-00000000f120",
-      "name": "12 Send Batch Summary Email",
+      "id": "tp-16-email",
+      "name": "16 Send Batch Summary Email",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [4250, -50],
+      "position": [2500, 300],
       "onError": "continueRegularOutput",
-      "notes": "寄到 $env.BATCH_NOTIFY_EMAIL；未設就略過。"
+      "notes": "寄到 $env.BATCH_NOTIFY_EMAIL；未設就略過。SMTP credential 在 n8n GUI > Credentials 綁定。"
     }
   ],
   "connections": {
-    "00a Form Trigger — Manual": {
-      "main": [[{ "node": "01 Normalize Input", "type": "main", "index": 0 }]]
+    "00 Form — Start": {
+      "main": [[{ "node": "01 Sheet — Read Rows", "type": "main", "index": 0 }]]
     },
-    "00b Google Sheets Trigger (stub)": {
-      "main": [[{ "node": "01 Normalize Input", "type": "main", "index": 0 }]]
+    "01 Sheet — Read Rows": {
+      "main": [[{ "node": "02 Branch — picker or batch", "type": "main", "index": 0 }]]
     },
-    "01 Normalize Input": {
-      "main": [[{ "node": "01.5 Filter enabled", "type": "main", "index": 0 }]]
+    "02 Branch — picker or batch": {
+      "main": [[{ "node": "02b IF — picker mode?", "type": "main", "index": 0 }]]
     },
-    "01.5 Filter enabled": {
+    "02b IF — picker mode?": {
       "main": [
-        [{ "node": "02 SplitInBatches (batchSize=1)", "type": "main", "index": 0 }],
-        []
+        [{ "node": "03 Form — Pick Project", "type": "main", "index": 0 }],
+        [{ "node": "05 Normalize Input", "type": "main", "index": 0 }]
       ]
     },
-    "02 SplitInBatches (batchSize=1)": {
+    "03 Form — Pick Project": {
+      "main": [[{ "node": "04 Resolve Pick → Row", "type": "main", "index": 0 }]]
+    },
+    "04 Resolve Pick → Row": {
+      "main": [[{ "node": "05 Normalize Input", "type": "main", "index": 0 }]]
+    },
+    "05 Normalize Input": {
+      "main": [[{ "node": "06 SplitInBatches (batchSize=1)", "type": "main", "index": 0 }]]
+    },
+    "06 SplitInBatches (batchSize=1)": {
       "main": [
-        [{ "node": "11 Aggregate Batch Summary", "type": "main", "index": 0 }],
-        [{ "node": "03 Precheck & Warning", "type": "main", "index": 0 }]
+        [{ "node": "14 Aggregate Batch Summary", "type": "main", "index": 0 }],
+        [{ "node": "07 Precheck & Warning", "type": "main", "index": 0 }]
       ]
     },
-    "03 Precheck & Warning": {
-      "main": [[{ "node": "04 Write testing.yml + .env", "type": "main", "index": 0 }]]
+    "07 Precheck & Warning": {
+      "main": [[{ "node": "08 Write testing.yml + .env", "type": "main", "index": 0 }]]
     },
-    "04 Write testing.yml + .env": {
-      "main": [[{ "node": "04.5 Extract Registry Path", "type": "main", "index": 0 }]]
+    "08 Write testing.yml + .env": {
+      "main": [[{ "node": "09 Extract Registry Path", "type": "main", "index": 0 }]]
     },
-    "04.5 Extract Registry Path": {
-      "main": [[{ "node": "05 Register Project", "type": "main", "index": 0 }]]
+    "09 Extract Registry Path": {
+      "main": [[{ "node": "10 Register Project", "type": "main", "index": 0 }]]
     },
-    "05 Register Project": {
-      "main": [[{ "node": "05.5 Pass-through", "type": "main", "index": 0 }]]
+    "10 Register Project": {
+      "main": [[{ "node": "11 Run Tests (scopes CSV)", "type": "main", "index": 0 }]]
     },
-    "05.5 Pass-through": {
-      "main": [[{ "node": "06 Run Tests (scopes CSV)", "type": "main", "index": 0 }]]
+    "11 Run Tests (scopes CSV)": {
+      "main": [[{ "node": "12 Generate Scorecard (--json)", "type": "main", "index": 0 }]]
     },
-    "06 Run Tests (scopes CSV)": {
-      "main": [[{ "node": "07 Generate Scorecard (--json)", "type": "main", "index": 0 }]]
+    "12 Generate Scorecard (--json)": {
+      "main": [[{ "node": "13 Parse Results", "type": "main", "index": 0 }]]
     },
-    "07 Generate Scorecard (--json)": {
-      "main": [[{ "node": "08 Parse Results", "type": "main", "index": 0 }]]
+    "13 Parse Results": {
+      "main": [[{ "node": "06 SplitInBatches (batchSize=1)", "type": "main", "index": 0 }]]
     },
-    "08 Parse Results": {
-      "main": [[{ "node": "09 IF Should Notify (row)", "type": "main", "index": 0 }]]
+    "14 Aggregate Batch Summary": {
+      "main": [[{ "node": "15 IF BATCH_NOTIFY_EMAIL set", "type": "main", "index": 0 }]]
     },
-    "09 IF Should Notify (row)": {
+    "15 IF BATCH_NOTIFY_EMAIL set": {
       "main": [
-        [{ "node": "10 Send Email (row)", "type": "main", "index": 0 }],
-        [{ "node": "02 SplitInBatches (batchSize=1)", "type": "main", "index": 0 }]
-      ]
-    },
-    "10 Send Email (row)": {
-      "main": [[{ "node": "02 SplitInBatches (batchSize=1)", "type": "main", "index": 0 }]]
-    },
-    "11 Aggregate Batch Summary": {
-      "main": [[{ "node": "11.5 IF BATCH_NOTIFY_EMAIL set", "type": "main", "index": 0 }]]
-    },
-    "11.5 IF BATCH_NOTIFY_EMAIL set": {
-      "main": [
-        [{ "node": "12 Send Batch Summary Email", "type": "main", "index": 0 }],
+        [{ "node": "16 Send Batch Summary Email", "type": "main", "index": 0 }],
         []
       ]
     }
