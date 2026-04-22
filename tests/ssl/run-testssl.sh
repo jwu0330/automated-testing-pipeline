@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-TARGET="${TARGET_URL:-https://xcity.babydodofun.com}"
+TARGET="${TARGET_URL:?TARGET_URL 環境變數必填；此腳本只應由 run-project.sh 或 docker-compose（TARGET_URL 已 export）呼叫}"
 REPORT_DIR="/workspace/reports"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 

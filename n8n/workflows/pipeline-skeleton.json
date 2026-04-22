@@ -5,30 +5,32 @@
   "active": true,
   "nodes": [
     {
-      "parameters": {},
-      "id": "tp-00000000-0000-0000-0000-000000000001",
-      "name": "Manual Trigger — 手動觸發",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [200, -200]
-    },
-    {
       "parameters": {
-        "rule": {
-          "interval": [
+        "formTitle": "Testing Pipeline — Run Project",
+        "formDescription": "選擇要跑測試的專案（必須先用 scripts/register-project.sh 註冊過），送出後立即執行。",
+        "formFields": {
+          "values": [
             {
-              "field": "cronExpression",
-              "expression": "0 3 * * *"
+              "fieldLabel": "projectName",
+              "placeholder": "例：babydodofun",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "notifyEmail",
+              "fieldType": "email",
+              "placeholder": "失敗時通知的 Email（留空則不通知）",
+              "requiredField": false
             }
           ]
-        }
+        },
+        "options": {}
       },
-      "id": "tp-00000000-0000-0000-0000-000000000022",
-      "name": "Schedule Trigger — 每日 03:00 自動執行",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [200, -50],
-      "notes": "每天凌晨 3 點（Asia/Taipei）自動觸發；時區來自 GENERIC_TIMEZONE。改排程直接修 cronExpression 即可。"
+      "id": "tp-00000000-0000-0000-0000-000000000001",
+      "name": "Manual Trigger — 手動觸發（Form）",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [200, -200],
+      "notes": "唯一觸發點：n8n UI 點 Execute workflow 會跳出 Form 輸入 projectName。不做自動排程。"
     },
     {
       "parameters": {
@@ -37,7 +39,13 @@
             {
               "id": "v-proj",
               "name": "projectName",
-              "value": "babydodofun",
+              "value": "={{ $json.projectName }}",
+              "type": "string"
+            },
+            {
+              "id": "v-mail",
+              "name": "notifyEmail",
+              "value": "={{ $json.notifyEmail || '' }}",
               "type": "string"
             }
           ]
@@ -49,7 +57,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [500, -200],
-      "notes": "設定要跑的專案名稱（projects.registry.yml 的 key）。雙擊修改。"
+      "notes": "接 Form Trigger 的 projectName / notifyEmail。"
     },
     {
       "parameters": {
@@ -60,8 +68,8 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [800, -200],
-      "onError": "continueRegularOutput",
-      "notes": "scope = precheck（URL 探測）"
+      "onError": "stopWorkflow",
+      "notes": "scope = precheck（URL 探測）。失敗立即中止整條流水線，避免後續 20 分鐘空轉。"
     },
     {
       "parameters": {
@@ -270,21 +278,72 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "try {\n  return JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    exitCode: $json.exitCode,\n  };\n}"
+        "jsCode": "const projectName = $('01 Init - Set Project Vars').first().json.projectName;\nconst notifyEmail = $('01 Init - Set Project Vars').first().json.notifyEmail || '';\ntry {\n  const parsed = JSON.parse($json.stdout);\n  return { ...parsed, projectName, notifyEmail };\n} catch (e) {\n  return {\n    projectName,\n    notifyEmail,\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    exitCode: $json.exitCode,\n  };\n}"
       },
       "id": "tp-00000000-0000-0000-0000-000000000010",
       "name": "Report - Parse Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [2200, 0],
-      "notes": "解析 JSON 成結構化物件（n8n Schema 面板可逐欄顯示）"
+      "notes": "解析 JSON，同時把 projectName / notifyEmail 帶到下游。"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-email",
+              "leftValue": "={{ $json.notifyEmail }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "cond-failed",
+              "leftValue": "={{ $json.parseError ? true : (typeof $json.overallScore === 'number' ? $json.overallScore < 80 : false) }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000023",
+      "name": "Notify - Should Send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2450, 0],
+      "notes": "兩個條件都成立才寄：(a) 有填 notifyEmail (b) parseError 或 overallScore < 80。"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM || 'pipeline@localhost' }}",
+        "toEmail": "={{ $json.notifyEmail }}",
+        "subject": "=[Testing Pipeline] {{ $json.projectName }} 測試失敗 ({{ $json.parseError ? 'parse error' : 'score ' + $json.overallScore }})",
+        "emailFormat": "text",
+        "text": "=專案：{{ $json.projectName }}\n總分：{{ $json.overallScore || 'N/A' }}\n時間：{{ $now.toISO() }}\n\n詳情（JSON）：\n{{ JSON.stringify($json, null, 2) }}",
+        "options": {}
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000024",
+      "name": "Notify - Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [2700, -80],
+      "onError": "continueRegularOutput",
+      "notes": "需在 n8n GUI > Credentials 建立 SMTP credential 後，到此節點選綁。"
     }
   ],
   "connections": {
-    "Manual Trigger — 手動觸發": {
-      "main": [[{ "node": "01 Init - Set Project Vars", "type": "main", "index": 0 }]]
-    },
-    "Schedule Trigger — 每日 03:00 自動執行": {
+    "Manual Trigger — 手動觸發（Form）": {
       "main": [[{ "node": "01 Init - Set Project Vars", "type": "main", "index": 0 }]]
     },
     "01 Init - Set Project Vars": {
@@ -347,6 +406,15 @@
     },
     "Report - Generate Scorecard": {
       "main": [[{ "node": "Report - Parse Results", "type": "main", "index": 0 }]]
+    },
+    "Report - Parse Results": {
+      "main": [[{ "node": "Notify - Should Send?", "type": "main", "index": 0 }]]
+    },
+    "Notify - Should Send?": {
+      "main": [
+        [{ "node": "Notify - Send Email", "type": "main", "index": 0 }],
+        []
+      ]
     }
   },
   "settings": {

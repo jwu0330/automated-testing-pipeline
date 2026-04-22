@@ -14,7 +14,7 @@ services:
       - .env
     environment:
       # 讓 run-project.sh export 的 shell 變數覆寫 .env 預設值
-      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - TARGET_URL=${TARGET_URL:?TARGET_URL 必填，請由 scripts/run-project.sh 或 .env 提供}
     entrypoint: ["/bin/bash", "/workspace/tests/run-testssl.sh"]
     profiles:
       - ssl
@@ -32,7 +32,7 @@ services:
       - .env
     command: >
       zap-baseline.py
-        -t ${TARGET_URL:-https://xcity.babydodofun.com}
+        -t ${TARGET_URL:?TARGET_URL 必填，請由 scripts/run-project.sh 或 .env 提供}
         -r zap-report.html
         -J zap-report.json
         -l WARN
@@ -52,7 +52,7 @@ services:
     env_file:
       - .env
     environment:
-      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - TARGET_URL=${TARGET_URL:?TARGET_URL 必填，請由 scripts/run-project.sh 或 .env 提供}
       - K6_VUS=${K6_VUS:-10}
       - K6_DURATION=${K6_DURATION:-30s}
     command: >
@@ -75,7 +75,7 @@ services:
     env_file:
       - .env
     environment:
-      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - TARGET_URL=${TARGET_URL:?TARGET_URL 必填，請由 scripts/run-project.sh 或 .env 提供}
       - NUCLEI_SEVERITY=${NUCLEI_SEVERITY:-critical,high,medium}
       - NUCLEI_RATE_LIMIT=${NUCLEI_RATE_LIMIT:-50}
     # 用 sh 包起來避免 compose 在命令插值時吃掉空字串；同時把 jsonl 輸出到已知路徑
@@ -112,7 +112,7 @@ services:
     env_file:
       - .env
     environment:
-      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - TARGET_URL=${TARGET_URL:?TARGET_URL 必填，請由 scripts/run-project.sh 或 .env 提供}
       - LIGHTHOUSE_PAGES=${LIGHTHOUSE_PAGES:-/}
       - LIGHTHOUSE_PRESET=${LIGHTHOUSE_PRESET:-desktop}
     entrypoint: ["/bin/bash", "/work/lighthouse-run.sh"]
@@ -131,7 +131,7 @@ services:
     env_file:
       - .env
     environment:
-      - TARGET_URL=${TARGET_URL:-https://xcity.babydodofun.com}
+      - TARGET_URL=${TARGET_URL:?TARGET_URL 必填，請由 scripts/run-project.sh 或 .env 提供}
       - LYCHEE_MAX_CONCURRENCY=${LYCHEE_MAX_CONCURRENCY:-4}
       - LYCHEE_TIMEOUT=${LYCHEE_TIMEOUT:-15}
     command:
@@ -144,7 +144,7 @@ services:
       - "${LYCHEE_TIMEOUT:-15}"
       - --max-concurrency
       - "${LYCHEE_MAX_CONCURRENCY:-4}"
-      - "${TARGET_URL:-https://xcity.babydodofun.com}"
+      - "${TARGET_URL:?TARGET_URL 必填，請由 scripts/run-project.sh 或 .env 提供}"
     profiles:
       - links
       - all
@@ -225,6 +225,8 @@ services:
       # n8n v2 breaking change：預設停用 executeCommand 與 localFileTrigger；
       # 我們需要 executeCommand 來呼叫 run-project.sh，設空陣列解鎖
       - NODES_EXCLUDE=[]
+      # 失敗通知寄件者（workflow 的 Email Send 節點用 $env.SMTP_FROM）
+      - SMTP_FROM=${SMTP_FROM:-pipeline@localhost}
     volumes:
       - n8n_data:/home/node/.n8n
       # Docker-outside-of-Docker：workflow 可執行 docker compose

@@ -179,6 +179,16 @@ bash scripts/run-project.sh <name> security   # 單一測試類型
 
 ---
 
+## 操作注意事項
+
+- **觸發方式只做手動**：n8n workflow 使用 Form Trigger，按 Execute workflow 時輸入 `projectName` 才會跑；**不做自動排程**，避免無人值守時對線上站做破壞性測試（ZAP/k6/Nuclei）。
+- **報告輪替**：`scripts/run-project.sh` 每次開跑前會呼叫 `scripts/rotate-reports.sh`，把超過 `REPORTS_KEEP_DAYS`（預設 30）天的報告打包進 `reports/<name>/archive/YYYY-MM.tar.gz`，archive 超過 365 天會自動刪。要關閉：`REPORTS_NO_ROTATE=1`。
+- **失敗通知**：Form Trigger 可填 `notifyEmail`；`overallScore < 80` 或 summary JSON 解析失敗時會寄信。SMTP credential 請在 n8n GUI 綁定，寄件者走 `SMTP_FROM` env。
+- **中文路徑風險**：`projects.registry.yml` 裡若路徑含中文（例 `/mnt/e/cwe網站/...`），在 docker volume mount 跨 WSL ↔ Windows 偶爾會出問題。建議客戶專案放在純英數路徑，或在 WSL 內 `mklink` 別名。
+- **docker.sock 掛載是 root-on-host**：n8n 容器掛了 `/var/run/docker.sock` + 整個 `/mnt/e`。**只適合單機開發環境**；若要上雲或多租戶，改用 sysbox / rootless docker 或乾脆把 executeCommand 拆到 sidecar。
+
+---
+
 ## 版本紀錄
 
 | 版本 | 日期 | 說明 |
@@ -186,3 +196,4 @@ bash scripts/run-project.sh <name> security   # 單一測試類型
 | v0.1 | 2026-04-21 | 初始專案建立 |
 | v0.2 | 2026-04-21 | 補齊骨架：n8n、PHPStan、PHPUnit、Playwright、專案註冊機制、規範文件 |
 | v0.3 | 2026-04-21 | 補齊五工具：Nuclei（深層資安）/ Lighthouse（前端品質）/ Gremlins monkey / Trivy（供應鏈）/ Lychee（壞連結） |
+| v0.4 | 2026-04-22 | 通用化：Form Trigger 取代寫死 projectName、失敗 Email 通知、Precheck 失敗即中止、reports 自動輪替、移除 xcity.babydodofun fallback |

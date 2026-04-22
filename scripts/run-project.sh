@@ -93,6 +93,12 @@ mkdir -p "$REPORTS_RAW"
 # Docker 內部看到的 raw 路徑（所有工具寫這裡）
 export REPORTS_RAW_DIR="$REPORTS_RAW"
 
+# ─── 報告輪替：每次開跑前把超過 REPORTS_KEEP_DAYS 天的舊報告打包進 archive/
+#     關閉方式：REPORTS_KEEP_DAYS=0（或 export REPORTS_NO_ROTATE=1）
+if [ "${REPORTS_NO_ROTATE:-0}" != "1" ] && [ -x "$ROOT/scripts/rotate-reports.sh" ]; then
+    bash "$ROOT/scripts/rotate-reports.sh" "$NAME" "${REPORTS_KEEP_DAYS:-30}" || true
+fi
+
 echo "╔══════════════════════════════════════════════════╗"
 echo "║  01 Init - Set Project Vars"
 echo "║  專案測試：$NAME"
