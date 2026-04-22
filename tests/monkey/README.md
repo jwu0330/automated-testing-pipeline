@@ -5,7 +5,7 @@
 
 ## 工作原理
 
-1. `run-project.sh <name> monkey` 以 `mcr.microsoft.com/playwright:v1.52.0-noble` 容器跑
+1. `run-project.sh <name> monkey` 以 `mcr.microsoft.com/playwright:v1.59.1-noble` 容器跑
 2. bind mount 本目錄到容器，`npm ci` → `playwright test`
 3. `gremlins.spec.ts` 對每個 `MONKEY_PAGES` 頁面：
    - 開頁 → 注入 gremlins.js → 放出攻擊

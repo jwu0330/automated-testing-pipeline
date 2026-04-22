@@ -1,141 +1,157 @@
-# `.testing/` — 專案測試工具包（Project Testing Kit）
+# `.testing/` — 專案測試工具包
 
-> 把這個資料夾整包複製到你的專案根目錄，就能把這個專案接上**共用的 `automated-testing-pipeline`**。
->
-> 本文件是**唯一一份說明**，內容就是全部。
+> 把這個資料夾整包放到你的專案根目錄，就能接上共用 `automated-testing-pipeline`。
 
 ---
 
-## TL;DR — 三步驟一鍵跑
+## 快速開始（3 步驟）
 
 ```bash
-# 1. 整包複製（直接保留資料夾名 .testing/）
+# 1. 整包複製（保留資料夾名 .testing/）
 cp -r /path/to/automated-testing-pipeline/.testing /path/to/your-project/
 
-# 2. 編輯 4 個必填欄位
+# 2. 編輯 testing.yml 裡的 4 個必填欄位
 vim your-project/.testing/testing.yml
 
-# 3. 一鍵跑完所有 n8n 流程
+# 3. 一鍵跑完
 bash your-project/.testing/link.sh
 ```
 
-跑完後報告在：`<pipeline>/reports/<your-project-name>/report.md`
+報告產出：`<pipeline>/reports/<your-project-name>/report.md`
 
 ---
 
-## 一、固定流程（只能這麼做）
+## 一、必填（少一個就跑不起來）
 
-這些是**不能改、沒有其他路徑**的規則。違反了就跑不起來。
-
-| # | 規則 | 為什麼不能改 |
-|---|------|-----|
-| 1 | 資料夾名必須是 `.testing/`，放在專案根目錄 | pipeline 用這個路徑自動偵測 |
-| 2 | 設定檔名必須是 `testing.yml` | `run-project.sh` 寫死讀這個檔名 |
-| 3 | `testing.yml` 必須含 `schema_version: 2` 和 4 個必填欄位（見下） | 少一個就 fail-fast |
-| 4 | `.env`（若有）**不要** commit | 敏感值；`.gitignore` 已排除 |
-| 5 | 所有測試容器由**共用 pipeline** 執行，不在本專案 build | 避免每個專案都各裝一套 Docker image |
-| 6 | 執行入口**只有** `link.sh`，不要自己呼叫 `run-project.sh` | link.sh 會處理註冊 + 啟動 + 執行 |
-
----
-
-## 二、必要（Required）
-
-做這些才跑得起來。
-
-### 2.1 必要檔案
-
-| 檔案 | 用途 |
-|------|------|
-| `testing.yml` | 4 個必填欄位：`name` / `target_url` / `local_path` / `php_version` |
-| `link.sh` | 一鍵連結 + 執行流程；**不要改**（改了就收不到未來更新） |
-| `README.md` | 本文件；留著讓後人看 |
-
-### 2.2 必填欄位（4 個）
-
-編輯 `testing.yml`：
+### 1.1 `testing.yml`（4 個欄位）
 
 ```yaml
 schema_version: 2
 
 project:
-  name: my_site                           # ① 專案識別名稱（英數底線）
-  target_url: https://my-site.com         # ② 線上測試目標 URL
-  local_path: /mnt/e/code/my-site         # ③ 本地原始碼絕對路徑（可空字串 "" → 只跑網路測試）
-  php_version: "8.1"                      # ④ PHP 版本（非 PHP 專案留預設即可）
+  name: my_site                          # 專案識別名稱（英數底線）
+  target_url: https://my-site.com        # 線上測試目標 URL
+  local_path: /mnt/e/code/my-site        # 本地原始碼絕對路徑；"" → 只跑網路測試
+  php_version: "8.1"                     # 非 PHP 專案留預設即可
 ```
 
-### 2.3 共用 pipeline 的位置
+### 1.2 固定規則
 
-`link.sh` 找共用 pipeline 的順序（三擇一）：
+| 規則 | 為什麼不能改 |
+|------|-----|
+| 資料夾名必須是 `.testing/`，放在專案根目錄 | pipeline 靠這路徑偵測 |
+| 設定檔名必須是 `testing.yml` | `run-project.sh` 寫死讀這檔名 |
+| `.env`（若有）不要 commit | 敏感值；已寫入 `.gitignore` |
+| 所有測試容器由共用 pipeline 執行 | 避免每專案各裝一套 Docker image |
+| 執行入口只用 `link.sh` | 會處理註冊 + 啟動 + 執行 |
 
-```
-環境變數 PIPELINE_HOME
-   ↓ 沒設就看 ↓
-testing.yml 的 pipeline.home
-   ↓ 沒寫就用 ↓
-預設路徑 /mnt/e/Code/github/automated-testing-pipeline
-```
+### 1.3 共用 pipeline 的位置
 
-共用 pipeline 只需要存在一份，`n8n` 容器也只會起一個（所有專案都連到同一個 http://localhost:5678）。
+`link.sh` 按這順序找：
+
+1. 環境變數 `PIPELINE_HOME`
+2. `testing.yml` 的 `pipeline.home` 欄位
+3. 預設 `/mnt/e/Code/github/automated-testing-pipeline`
 
 ---
 
-## 三、可選（Optional）
+## 二、按需啟用（有用到才填）
 
-只在「這個專案需要這種測試」時才填對應資料夾；不需要就留空。
+### 2.1 專案客製測試（各資料夾）
 
-### 3.1 可選：專案客製測試（13 個資料夾）
+> **需要專案測試碼**（unit / e2e / api）：資料夾放了檔案才會跑
+> **通用測試的覆寫**（ssl / security / stress / static / ...）：一律會跑；資料夾只是額外客製
 
-> 「啟用條件」欄位要小心區分兩類：
-> - **需要專案測試碼**（unit/e2e）：資料夾要放檔案才會跑
-> - **通用測試的覆寫/客製**（ssl/security/stress/static/lighthouse/nuclei/monkey/trivy/links）：一律會跑；資料夾只是讓你**額外客製**
+| 資料夾 | 觸發條件 | 放什麼 |
+|--------|---------|--------|
+| `unit/` | 有 `unit/phpunit.xml` → 才會跑 | `phpunit.xml` + `bootstrap.php` + `tests/*Test.php` |
+| `unit/fixtures/` | 有任一 `*.sql` → 自動啟 test-mysql | 初始資料 SQL |
+| `e2e/` | 有 `e2e/package.json` → 才會跑 | `package.json` + `playwright.config.ts` + `tests/*.spec.ts` |
+| `api/collections/` | 有 `*.postman_collection.json` → 才會跑 | Postman collection JSON |
+| `static/phpstan.neon` | 存在 → 覆寫預設 | 客製 PHPStan 設定 |
+| `ssl/*.conf` | 存在 → 覆寫預設 | 客製 testssl.sh 參數 |
+| `security/zap.conf` | 存在 → 覆寫預設 | 自訂 ZAP 規則 |
+| `stress/load-test.js` | 存在 → 取代預設 | 客製 k6 腳本 |
+| `nuclei/templates/` | 存在 → 額外模板 | 自訂 nuclei YAML |
+| `monkey/gremlins.spec.ts` | 存在 → 取代骨架 | 需登入等情境的 monkey spec |
+| `hooks/pre.sh` / `post.sh` | 存在 → 測試前/後執行 | shell 鉤子 |
 
-| 資料夾 | 測試類型 | 觸發 / 客製條件 | 要放什麼 |
-|--------|----------|-----------------|----------|
-| `unit/` | PHPUnit 單元測試 | 有 `unit/phpunit.xml` → **才會跑** | `phpunit.xml` + `bootstrap.php` + `tests/*Test.php` |
-| `e2e/` | Playwright 端對端 | 有 `e2e/package.json` → **才會跑** | `package.json` + `playwright.config.ts` + `tests/*.spec.ts` |
-| `static/` | PHPStan 設定覆寫 | 有 `static/phpstan.neon` → 覆寫預設 | 客製 `phpstan.neon` |
-| `ssl/` | SSL 檢測參數 | 有 `ssl/*.conf` → 覆寫預設 | 客製 testssl.sh 參數 |
-| `security/` | ZAP 掃描設定 | 有 `security/zap.conf` → 覆寫預設 | 自訂 ZAP 規則 |
-| `stress/` | k6 壓力腳本 | 有 `stress/load-test.js` → 取代預設 | 客製 k6 腳本 |
-| `lighthouse/` | 前端品質 | 有 `lighthouse/config.js` → 覆寫預設 | Lighthouse 客製設定（預留） |
-| `nuclei/` | 深層資安 | 有 `nuclei/templates/` → 額外模板 | 自訂 nuclei YAML 模板 |
-| `monkey/` | Gremlins 互動探測 | 有 `monkey/gremlins.spec.ts` → 取代骨架 | 客製 monkey spec（需登入等情境） |
-| `trivy/` | 供應鏈掃描 | 有 `trivy/.trivyignore` → 額外排除 | 客製忽略清單（預留） |
-| `links/` | 壞連結檢查 | 有 `links/lychee.toml` → 覆寫預設 | 客製 lychee config（預留） |
-| `hooks/` | pre/post 鉤子 | 有 `hooks/pre.sh` or `post.sh` | 測試前/後執行的 shell |
-| `scripts/` | 專案客製腳本 | 由 `testing.yml` 指定 | 任何協助腳本 |
+### 2.2 測試身分（給 `api-test` / `auth-test` 用）
 
-**預留**：lighthouse/trivy/links 的資料夾客製尚未被 pipeline 讀取（目前只透過 `testing.yml` 的 `tests.<tool>.*` 覆寫）。先留資料夾是為了未來擴充時不用再次改結構。
+> **重點**：不同身分應該看到不同頁面/API。管理者能進的頁，一般使用者應該 401/403。每個身分跑一輪完整 collection。
 
-### 3.2 可選：DB 整合測試
-
-若 `unit/` 測試要連 DB：
-
-```
-.testing/unit/fixtures/001_seed.sql
-```
-
-放一個 `.sql` 檔就**自動**啟動 pipeline 的 `test-mysql` 容器（用完即棄 tmpfs），注入環境變數 `TEST_DB_HOST=test-mysql` 等到 PHPUnit 容器。
-
-### 3.3 可選：敏感變數
-
-需要時才建：
+在 `.testing/.env` 填（最多 6 組：1 ADMIN + 5 USER）：
 
 ```bash
-cp .env.example .env
-# 編輯 .env 填入 E2E_USERNAME / E2E_PASSWORD / API_TOKEN 等
+ADMIN_USERNAME=admin001            # 管理者（寫死預設）
+ADMIN_PASSWORD=@admin001
+
+USER1_USERNAME=                    # 選填，留空 → 此身分整輪 skip
+USER1_PASSWORD=
+USER1_LABEL=line_signup            # 選填，報告檔名會帶這個標籤
+
+USER2_USERNAME=                    # 再加就填 USER2_ / USER3_ ...
+USER2_PASSWORD=
+USER2_LABEL=phone_signup
+
+# USER3_ / USER4_ / USER5_ 同理
 ```
 
-### 3.4 可選：覆寫測試參數
+**行為**：給幾組帳密就跑幾輪。報告檔名：
+
+```
+newman-junit-admin.xml
+newman-junit-user1-line_signup.xml
+newman-junit-user2-phone_signup.xml
+```
+
+**為什麼要跑多輪？** 不同註冊管道（LINE / 手機 / Email）雖然看起來一樣，但：
+- 登入流程可能差一步（LINE 不需要 OTP、手機要）
+- 管理端跟使用者端的 UI 常常是兩套
+- 即使只是細微差異，都要獨立驗過才能確定沒漏
+
+### 2.3 DB 整合測試
+
+`unit/` 測試要連 DB：放一個 `.sql` 檔到 `.testing/unit/fixtures/` 就**自動**啟動 test-mysql 容器（用後即棄 tmpfs）。
+
+### 2.4 覆寫測試參數
 
 在 `testing.yml` 加 `tests:` 區塊（範例見 `testing.yml` 註解）。沒寫就走自動偵測。
 
+### 2.5 E2E 登入（舊欄位，向下相容）
+
+Playwright 舊 spec 用的 `E2E_USERNAME` / `E2E_PASSWORD` 放在 `.testing/.env`，通常沿用 `ADMIN_*` 的值即可。
+
 ---
 
-## 四、自動偵測規則（Silence = Default）
+## 三、一鍵指令
 
-沒在 `testing.yml` 寫、對應資料夾也沒放檔案時，pipeline 的預設行為：
+```bash
+bash .testing/link.sh              # 連結 + 跑完全部
+bash .testing/link.sh link         # 只連結，不跑
+bash .testing/link.sh run          # 只跑（之前已連結過）
+```
+
+`link.sh` 做的事：
+1. 讀 `testing.yml` 拿專案名稱/路徑
+2. 呼叫 pipeline 的 `register-project.sh` 註冊
+3. 確認 n8n 容器啟動
+4. 呼叫 `run-project.sh <name> all` 跑 11 種測試 + 產評分卡
+
+單獨跑某個 scope（不走 n8n）：
+
+```bash
+bash <pipeline>/scripts/run-project.sh <name> <scope>
+# scope 可用：ssl / security / stress / static / unit / e2e /
+#             api-test / auth-test / db-test / visual-test / browser-compat /
+#             nuclei / lighthouse / monkey / trivy / links
+```
+
+---
+
+## 附錄 A：自動偵測規則（Silence = Default）
+
+沒在 `testing.yml` 寫、對應資料夾也沒放檔案時的預設：
 
 | 測試 | 預設 |
 |------|------|
@@ -145,88 +161,81 @@ cp .env.example .env
 | static (PHPStan) | `local_path` 有 `.php` 檔就開（level=5） |
 | unit (PHPUnit) | `.testing/unit/phpunit.xml` 存在才開 |
 | e2e (Playwright) | `.testing/e2e/package.json` 存在才開 |
-| unit + DB | `.testing/unit/fixtures/*.sql` 存在才啟動 test-mysql |
-| **nuclei (深層資安)** | 一律開（severity=critical,high,medium, rate_limit=50） |
-| **lighthouse (前端品質)** | 一律開（preset=desktop, pages=[/]） |
-| **monkey (Gremlins.js)** | 一律開（pages=[/], attacks=500, delay_ms=10） |
-| **trivy (供應鏈)** | `local_path` 不為空就開（severity=CRITICAL,HIGH,MEDIUM） |
-| **links (Lychee)** | 一律開（timeout=15, max_concurrency=4） |
+| unit + DB | `.testing/unit/fixtures/*.sql` 存在才啟 test-mysql |
+| api-test / auth-test | `.testing/api/collections/*.postman_collection.json` 存在才開 |
+| nuclei | 一律開（severity=critical,high,medium） |
+| lighthouse | 一律開（preset=desktop, pages=[/]） |
+| monkey | 一律開（pages=[/], attacks=500, delay_ms=10） |
+| trivy | `local_path` 不為空就開（severity=CRITICAL,HIGH,MEDIUM） |
+| links | 一律開（timeout=15, max_concurrency=4） |
 
 **原則：沉默＝用預設；要覆寫才寫。**
 
 ---
 
-## 五、一鍵指令
-
-### 5.1 完整一鍵（連結 + 跑完全部）
-
-```bash
-bash .testing/link.sh
-```
-
-做了這些事：
-1. 讀 `testing.yml` 拿專案名稱與路徑
-2. 呼叫共用 pipeline 的 `register-project.sh` 註冊
-3. 確認共用 n8n 容器已啟動（沒啟就起）
-4. 呼叫 `run-project.sh <name> all` 跑完 **11 種測試**（ssl / security / nuclei / stress / lighthouse / links / static / trivy / unit / e2e / monkey）
-5. 顯示報告路徑 + n8n GUI 網址
-
-### 5.2 只連結（不跑）
-
-```bash
-bash .testing/link.sh link
-```
-
-### 5.3 只跑（之前已連結過）
-
-```bash
-bash .testing/link.sh run
-```
-
----
-
-## 六、報告位置
+## 附錄 B：報告位置
 
 ```
-<共用 pipeline>/reports/<your-project-name>/
+<pipeline>/reports/<your-project-name>/
 ├── report.md              ★ 看這個就好
-├── report.json            結構化版本（n8n / CI 用）
+├── report.json            結構化版本（給 n8n / CI）
 ├── history.jsonl          累計歷史
 └── raw/                   工具原始輸出
+    ├── newman-junit-admin.xml                  API/Auth 身分：admin
+    ├── newman-junit-user1-line_signup.xml      API/Auth 身分：user1
+    ├── newman-junit-user2-phone_signup.xml     ...
+    ├── newman-junit.xml                        最後一輪的副本（給 summarize.js）
+    ├── phpunit.xml / coverage/
+    ├── playwright/ / playwright-junit.xml
+    ├── testssl-*.{html,json}
+    ├── zap-report.{html,json}
+    ├── k6-summary.json
+    ├── phpstan.json
+    ├── nuclei.jsonl
+    ├── lighthouse-*.{html,json}
+    ├── monkey-report.json
+    ├── trivy-fs.json
+    └── lychee.json
 ```
 
 n8n GUI：http://localhost:5678（帳密在 pipeline 的 `.env`）
 
 ---
 
-## 七、FAQ
+## 附錄 C：FAQ
 
-**Q：我不想 commit `.testing/` 整包，只想留 testing.yml？**
-A：不建議。其他人接手時 `link.sh` 就沒了，等於破壞固定流程。最多把 `.testing/.env` 和測試產物（`unit/test-results/`、`e2e/node_modules/`）排掉（已在 `.gitignore` 中）。
+**Q：我只想 commit `testing.yml`，不想整包 commit？**
+不建議。其他人接手時 `link.sh` 就沒了。最多把 `.env` 和測試產物（`unit/test-results/`、`e2e/node_modules/`）排掉（已在 `.gitignore` 中）。
 
-**Q：我有兩個專案要共用同一份 pipeline，要各複製一份 `.testing/` 嗎？**
-A：對。每個專案自己的 `.testing/` 是它的客製區；共用的只有 pipeline 本身（Docker 容器、腳本、n8n）。每個專案的 `name` 要不同，報告會分別放在 `reports/<name>/`。
+**Q：兩個專案要共用同一份 pipeline，要各複製一份 `.testing/` 嗎？**
+對。每個專案的 `.testing/` 是它自己的客製區；共用的只有 pipeline 本身。每個專案 `name` 要不同，報告分別放 `reports/<name>/`。
 
-**Q：pipeline 的位置和預設不一樣？**
-A：`export PIPELINE_HOME=/your/path` 再跑 `link.sh`；或在 `testing.yml` 取消註解 `pipeline.home` 欄位。
+**Q：pipeline 裝在非預設位置？**
+`export PIPELINE_HOME=/your/path` 再跑 `link.sh`，或在 `testing.yml` 取消註解 `pipeline.home`。
 
 **Q：`link.sh` 能改嗎？**
-A：**不建議**。未來 pipeline 更新時 `link.sh` 也會跟著動，改了就收不到更新。客製需求寫在 `hooks/pre.sh` 或 `hooks/post.sh`。
+不建議。未來 pipeline 更新 `link.sh` 也會跟著動，改了就收不到更新。客製需求寫在 `hooks/pre.sh` 或 `hooks/post.sh`。
 
-**Q：沒裝 yq 會怎樣？**
-A：`link.sh` 有簡易 fallback 能讀基本欄位；但共用 pipeline 的 `run-project.sh` 需要 yq。到 pipeline 主機裝一次即可：`wget -qO ~/.local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && chmod +x ~/.local/bin/yq`。
+**Q：沒裝 yq 怎麼辦？**
+`link.sh` 有簡易 fallback 能讀基本欄位；但 pipeline 的 `run-project.sh` 需要 yq。到 pipeline 主機裝一次即可：
+
+```bash
+wget -qO ~/.local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+chmod +x ~/.local/bin/yq
+```
+
+**Q：只給 1 組帳密會有問題嗎？**
+不會。admin 那輪照跑，USER1..5 全部 skip。要驗「管理端 vs 使用者端」隔離時才補其他組。
 
 ---
 
-## 八、檢查清單
-
-新專案第一次接入 pipeline：
+## 附錄 D：新專案接入檢查清單
 
 - [ ] 整包複製 `.testing/` 到專案根
-- [ ] 編輯 `.testing/testing.yml` 的 4 個必填欄位
-- [ ] （可選）若需要登入測試，`cp .env.example .env` 並編輯
+- [ ] 編輯 `testing.yml` 的 4 個必填欄位
+- [ ] （可選）需要 API/Auth 測試 → `cp .env.example .env`，填 `ADMIN_*` 和需要的 `USER*_*`
 - [ ] （可選）需要 unit 測試 → 放 `unit/phpunit.xml` + `unit/tests/*.php`
 - [ ] （可選）需要 e2e → 放 `e2e/package.json` + `e2e/tests/*.spec.ts`
-- [ ] （可選）調整新工具參數 → 在 `testing.yml` 加 `tests.nuclei.severity` / `tests.lighthouse.pages` / `tests.monkey.attacks` / `tests.trivy.severity` / `tests.links.timeout`
+- [ ] （可選）調整新工具參數 → 在 `testing.yml` 加 `tests.xxx.*` 區塊
 - [ ] 執行 `bash .testing/link.sh`
-- [ ] 打開 `<pipeline>/reports/<name>/report.md` 看結果（v0.3 起含 11 項評分）
+- [ ] 打開 `<pipeline>/reports/<name>/report.md` 看結果

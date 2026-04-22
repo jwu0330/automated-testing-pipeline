@@ -180,8 +180,9 @@ services:
   # 註：專案客製的 E2E 由 scripts/run-project.sh 直接 docker run 執行，
   #     本 service 僅用於流水線骨架本身的驗證。
   # ─────────────────────────────────────
+  # (API 測試用 docker run，見 run-project.sh run_api_test())
   playwright:
-    image: mcr.microsoft.com/playwright:v1.52.0-noble
+    image: mcr.microsoft.com/playwright:v1.59.1-noble
     container_name: playwright-runner
     volumes:
       - ./tests/e2e:/workspace

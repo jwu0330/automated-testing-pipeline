@@ -12,6 +12,8 @@
 4. [執行專案客製測試](#4-執行專案客製測試)
    - 4.1 單元測試 (PHPUnit)
    - 4.2 E2E 測試 (Playwright)
+   - 4.3 API / Auth 測試（Newman，多身分迴圈）
+   - 4.4 通用擴充測試（Nuclei / Lighthouse / Monkey / Trivy / Lychee）
 5. [檢視報告](#5-檢視報告)
 6. [常見問題 (FAQ)](#6-常見問題-faq)
 7. [進階：透過 n8n GUI 排程](#7-進階透過-n8n-gui-排程)
@@ -79,9 +81,16 @@ bash scripts/register-project.sh your-project /path/to/your-project
 | `trivy` | Trivy fs | 供應鏈：依賴 CVE / 洩漏 secret / 錯誤配置 |
 | `unit` | PHPUnit | 單元測試（見 §4.1） |
 | `e2e` | Playwright | UI/API 端對端測試（見 §4.2） |
+| `api-test` | Newman (Postman CLI) | **A3 + B6**：API 端點驗證 + 多身分權限驗證（見 §4.3） |
+| `auth-test` | Newman | `api-test` 的 n8n alias，共用同一份 collection |
+| `db-test` | MySQL + bash | **A4**：DB schema / fixture 完整性（見 §4.4） |
+| `visual-test` | Playwright `--grep C2` | **C2**：視覺基準線比對（只跑 `visual.spec.ts` 中的 C2 describe） |
+| `browser-compat` | Playwright `--grep C3` | **C3**：瀏覽器相容（chromium/firefox/webkit，跑 `visual.spec.ts` 中的 C3 describe） |
 | `monkey` | Gremlins.js | Monkey 測試：隨機亂點亂打，抓未處理 JS 錯誤 |
 | `all`（預設） | 全部 | 依序全部跑一遍、最後產評分卡 |
 | `summary` | summarize.js | 僅彙整既有報告成評分卡 |
+
+> **注意**：`auth-test`、`visual-test`、`browser-compat` 是 **n8n workflow 專用的 scope alias**。`all` 走主線（`api-test` 已涵蓋 auth / `e2e` 已涵蓋 visual & compat），不重複。
 
 範例：
 
@@ -220,7 +229,7 @@ babydodofun 的 `.testing/unit/tests/` 下有 3 個 DB 整合測試類（extends
     └── *.spec.ts            # Playwright 測試 spec
 ```
 
-**重要：`@playwright/test` 版本必須精確匹配 pipeline 使用的 docker image**（目前 `1.52.0`）。寫成 `"@playwright/test": "1.52.0"`，**不要加 caret `^`**。否則 `npm install` 會拉到最新版但 docker 內瀏覽器還是舊版，導致 `Executable doesn't exist` 錯誤。
+**重要：`@playwright/test` 版本必須精確匹配 pipeline 使用的 docker image**（目前 `1.59.1`）。寫成 `"@playwright/test": "1.59.1"`，**不要加 caret `^`**。否則 `npm install` 會拉到最新版但 docker 內瀏覽器還是舊版，導致 `Executable doesn't exist` 錯誤。
 
 #### 4.2.2 從範本建立
 
@@ -240,7 +249,7 @@ cp -r /mnt/e/Code/github/automated-testing-pipeline/tests/e2e/* \
 bash scripts/run-project.sh <project> e2e
 ```
 
-首次會 pull `mcr.microsoft.com/playwright:v1.52.0-noble`（約 2 GB，一次）。後續每次跑 `npm install` 約 30 秒 + 測試本身。
+首次會 pull `mcr.microsoft.com/playwright:v1.59.1-noble`（約 2 GB，一次）。後續每次跑 `npm install` 約 30 秒 + 測試本身。
 
 如果專案已有 `package-lock.json` 則用 `npm ci`（快、鎖定版本）；否則 fallback 到 `npm install`。
 
@@ -268,11 +277,102 @@ babydodofun 的 E2E 設計原則是**只讀**：不登入、不寫資料、不�
 
 ---
 
-### 4.3 通用擴充測試（Nuclei / Lighthouse / Monkey / Trivy / Lychee）
+### 4.3 API / Auth 測試（Newman，多身分迴圈）
+
+> 這一節對應 n8n workflow 的 **A3 API Validation** + **B6 Auth & Permission**。
+> 兩個 n8n 節點都呼叫 `api-test` / `auth-test` scope，共用同一份 Postman collection；每個身分跑一輪完整 collection。
+
+#### 4.3.1 專案需要的檔案
+
+```
+<project>/.testing/
+├── api/collections/
+│   └── <project>.postman_collection.json   # Postman collection v2.1（必須）
+└── .env                                    # 身分帳密（選填；需要才填）
+```
+
+#### 4.3.2 身分設計（最多 6 組：1 ADMIN + 5 USER）
+
+在 `.testing/.env` 填：
+
+```bash
+# 管理者（寫死預設，除非該站不同才覆寫）
+ADMIN_USERNAME=admin001
+ADMIN_PASSWORD=@admin001
+
+# 一般使用者 1..5（選填；留空 → 該輪整輪 skip）
+USER1_USERNAME=
+USER1_PASSWORD=
+USER1_LABEL=line_signup         # 顯示在報告檔名
+
+USER2_USERNAME=
+USER2_PASSWORD=
+USER2_LABEL=phone_signup
+
+# USER3_ / USER4_ / USER5_ 同理
+```
+
+**行為**：給 3 組帳密就跑 3 輪、給 5 組就跑 5 輪。每輪是一次完整 collection 執行，用不同身分登入、驗權限邊界。
+
+#### 4.3.3 Collection 如何讀身分
+
+`run-project.sh` 會對每個有填帳密的身分執行 Newman，注入：
+
+| 變數 | 值 |
+|------|----|
+| `{{CURRENT_IDENTITY}}` | `admin` / `user1` / `user2` / ... |
+| `{{CURRENT_USERNAME}}` | 該身分帳號 |
+| `{{CURRENT_PASSWORD}}` | 該身分密碼 |
+| `{{CURRENT_LABEL}}` | 該身分標籤（如 `line_signup`；可空） |
+| `{{base_url}}` | `project.target_url` |
+
+Collection test script 範例（以角色決定預期狀態）：
+
+```javascript
+const role = pm.variables.get('CURRENT_IDENTITY');
+
+if (role === 'admin') {
+  pm.test('管理者可存取 admin API', () => pm.response.to.have.status(200));
+} else {
+  pm.test('一般使用者不可存取 admin API', () => {
+    pm.expect([401, 403]).to.include(pm.response.code);
+  });
+}
+```
+
+#### 4.3.4 執行
+
+```bash
+bash scripts/run-project.sh <project> api-test       # 跑所有身分輪
+bash scripts/run-project.sh <project> auth-test      # 同上（n8n alias）
+```
+
+首次會從 `scripts/build-newman-image.sh` 建 `testing-pipeline-newman:latest`（Newman 6.x + 內建 junit reporter）。
+
+#### 4.3.5 報告
+
+每個身分獨立一份 XML：
+
+```
+reports/<project>/raw/
+├── newman-junit-admin.xml                  管理者身分
+├── newman-junit-user1-line_signup.xml      一般使用者 1（LINE 註冊）
+├── newman-junit-user2-phone_signup.xml     一般使用者 2（手機註冊）
+├── newman-admin.json                       cli + json 報告
+├── newman-user1-line_signup.json
+├── ...
+└── newman-junit.xml                        最後一輪副本（summarize.js 解析）
+```
+
+> **補充**：目前 `summarize.js` 只解析 `newman-junit.xml`（最後一輪副本）。若要讓評分卡彙總所有身分，未來會改成 glob 所有 `newman-junit-*.xml`。現在你能從 `raw/` 目錄直接看到每個身分的結果。
+
+---
+
+### 4.4 通用擴充測試（Nuclei / Lighthouse / Monkey / Trivy / Lychee）
 
 這五個工具皆為**流水線通用**（不需要專案客製測試碼），依 `target_url` 與 `local_path` 自動啟用。
 
-#### 4.3.1 Nuclei — 深層資安
+#### 4.4.1 Nuclei — 深層資安
 
 補 ZAP baseline 抓不到的 CVE / 錯誤配置 / 洩漏端點。用 ProjectDiscovery 模板引擎。
 
@@ -291,7 +391,7 @@ tests:
 
 首次會 pull `projectdiscovery/nuclei:latest`（約 200 MB）。模板自動內嵌 image，無需手動更新；要最新 CVE 請定期 `docker pull`。
 
-#### 4.3.2 Lighthouse — 前端品質
+#### 4.4.2 Lighthouse — 前端品質
 
 Core Web Vitals / A11y / Best Practices / SEO 四項分數 + LCP / CLS / TBT 指標。
 
@@ -310,7 +410,7 @@ tests:
 
 首次會 build `lighthouse:latest` image（`node:20-slim + chromium + lighthouse@12`，約 1 GB，一次）。
 
-#### 4.3.3 Monkey — Gremlins.js 互動探測
+#### 4.4.3 Monkey — Gremlins.js 互動探測
 
 注入 gremlins.js 做隨機點擊/打字/滾動，監聽 `pageerror` 未捕獲例外。**抓 E2E spec 寫不到的邊界 bug**。
 
@@ -330,7 +430,7 @@ tests:
 
 重用 E2E 的 Playwright image，不需額外空間。注入 `gremlins.js` 來自 unpkg CDN，需外網連線。
 
-#### 4.3.4 Trivy — 供應鏈掃描
+#### 4.4.4 Trivy — 供應鏈掃描
 
 同時掃 **依賴 CVE / 洩漏 secret / 錯誤配置** 三類。需要 `local_path`。
 
@@ -349,7 +449,7 @@ tests:
 
 用 `atp-trivy-cache` docker volume 快取 CVE DB，第二次之後跑很快（< 10 秒）。
 
-#### 4.3.5 Lychee — 壞連結檢查
+#### 4.4.5 Lychee — 壞連結檢查
 
 Rust 寫的超快連結檢查器，驗證頁面上所有 `<a>` / `<img>` / `<script>` 是否可達。
 
@@ -459,7 +559,7 @@ A: bootstrap.php 或 stubs.php 先宣告了一個該專案原始碼也會宣告�
 
 ### Q: Playwright 報「Executable doesn't exist at ...」
 
-A: package.json 的 `@playwright/test` 版本和 pipeline 的 docker image 對不上。把版本號寫**精確值**（如 `"1.52.0"`），不要 caret。
+A: package.json 的 `@playwright/test` 版本和 pipeline 的 docker image 對不上。把版本號寫**精確值**（如 `"1.59.1"`），不要 caret。
 
 ### Q: ZAP 回傳 exit code 2 算失敗嗎？
 

@@ -22,6 +22,22 @@ project:
 # pipeline:
 #   home: /mnt/e/Code/github/automated-testing-pipeline
 
+# ─── 可選：測試身分（給 api-test / auth-test）────────────
+#
+#   只是「文件提示」──實際帳密一律寫在 .testing/.env（不進 git）。
+#   支援最多 6 組：ADMIN + USER1..USER5，每組獨立跑一輪完整 collection。
+#
+#   .env 範本：
+#     ADMIN_USERNAME=admin001            # 管理者（寫死預設）
+#     ADMIN_PASSWORD=@admin001
+#     USER1_USERNAME=                    # 選填；留空 → 該輪整輪 skip
+#     USER1_PASSWORD=
+#     USER1_LABEL=line_signup            # 選填；顯示在報告檔名
+#     USER2_USERNAME= ...                # 再加就填 USER2_ / USER3_ ...
+#
+#   用法：給 3 組帳密就會跑 3 輪、給 5 組就跑 5 輪。
+#   報告檔名：newman-junit-admin.xml / newman-junit-user1-line_signup.xml ...
+
 # ─── 可選：覆寫測試開關／參數 ────────────────────────────
 #   沒寫 → 走自動偵測（見 README 的「自動偵測規則」）
 #
@@ -39,6 +55,13 @@ project:
 #       enabled: true
 #       username_env: E2E_USERNAME        # 值放 .testing/.env
 #       password_env: E2E_PASSWORD
+#     multi_browser: false                # 若要 firefox/webkit，改為 true（配合 playwright.config.ts）
+#
+#   # ─── A3 API 驗證 + A4 DB 驗證 ───
+#   api-test:
+#     enabled: true                       # 有 .testing/api/collections/ 就自動啟用
+#   db-test:
+#     enabled: true                       # 有 .testing/unit/fixtures/ 就自動啟用
 #
 #   # ─── v0.3 新增的 5 個通用測試 ───
 #   nuclei:

@@ -26,7 +26,7 @@ NAME="${1:-}"
 SCOPE="${2:-all}"
 
 if [ -z "$NAME" ]; then
-    echo "用法：bash scripts/run-project.sh <name> [all|precheck|ssl|security|stress|static|unit|e2e|nuclei|lighthouse|monkey|trivy|links|summary]"
+    echo "用法：bash scripts/run-project.sh <name> [all|precheck|ssl|security|stress|static|unit|e2e|api-test|auth-test|db-test|visual-test|browser-compat|nuclei|lighthouse|monkey|trivy|links|summary]"
     exit 1
 fi
 
@@ -140,6 +140,14 @@ enabled() {
         monkey)     true ;;
         trivy)      $LOCAL_MODE ;;
         links)      true ;;
+        api-test)
+            $LOCAL_MODE || return 1
+            ls "$PROJECT_PATH/.testing/api/collections/"*.postman_collection.json >/dev/null 2>&1
+            ;;
+        db-test)
+            $LOCAL_MODE || return 1
+            ls "$PROJECT_PATH/.testing/unit/fixtures"/*.sql >/dev/null 2>&1
+            ;;
     esac
 }
 
@@ -329,7 +337,7 @@ run_e2e() {
         -v "$PROJECT_PATH/.testing/e2e:/e2e" \
         -v "$REPORTS_RAW:/reports" \
         -w /e2e \
-        mcr.microsoft.com/playwright:v1.52.0-noble \
+        mcr.microsoft.com/playwright:v1.59.1-noble \
         sh -c '
             if [ -f package-lock.json ]; then
                 npm ci --no-audit --no-fund
@@ -400,7 +408,7 @@ run_monkey() {
         -v "$ROOT/tests/monkey:/monkey" \
         -v "$ROOT/reports:/reports" \
         -w /monkey \
-        mcr.microsoft.com/playwright:v1.52.0-noble \
+        mcr.microsoft.com/playwright:v1.59.1-noble \
         sh -c '
             if [ -f package-lock.json ]; then
                 npm ci --no-audit --no-fund
@@ -461,6 +469,178 @@ run_links() {
     echo "  報告：$REPORTS_RAW/lychee.json"
 }
 
+# ─── A3 / B6 API + Auth 測試（多身分迴圈）─────────────────
+#   讀 .env 裡的 ADMIN_* / USER1_*..USER5_*，每個身分跑一輪
+#   產出 newman-junit-admin.xml / newman-junit-user1-<label>.xml ...
+#   全部 run 完後，最新一次會以 newman-junit.xml 名義存一份給 summarize.js 用
+run_api_test() {
+    enabled api-test || { echo "⏭  API / Auth 測試：略過（無 .testing/api/collections/*.json）"; return 0; }
+    echo ""
+    echo "▶ API / Auth 測試 (Newman, 多身分迴圈)"
+    echo "──────────────────────────────────────────"
+
+    # 尋找專案客製 collection（必要），pipeline 通用版僅當骨架回退
+    local collection
+    collection=$(find "$PROJECT_PATH/.testing/api/collections" -name "*.postman_collection.json" 2>/dev/null | head -1 || echo "")
+    if [ -z "$collection" ]; then
+        collection=$(find "$ROOT/tests/api/collections" -name "*.postman_collection.json" 2>/dev/null | head -1 || echo "")
+    fi
+    if [ -z "$collection" ] || [ ! -f "$collection" ]; then
+        echo "  ⚠️  未找到 Postman collection，略過"
+        return 0
+    fi
+    echo "  Collection：$collection"
+
+    # 舊清單：跑前先砍掉上次殘留（避免 summarize.js 撿到舊檔）
+    rm -f "$REPORTS_RAW"/newman-junit-*.xml \
+          "$REPORTS_RAW"/newman-*.json      \
+          "$REPORTS_RAW"/newman-junit.xml   \
+          "$REPORTS_RAW"/newman.json 2>/dev/null || true
+
+    local env_args=()
+    [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+
+    # 身分清單：admin + user1..user5
+    local identities=(admin user1 user2 user3 user4 user5)
+    local ran=0 skipped=0
+
+    for id in "${identities[@]}"; do
+        local upper user_var pass_var label_var u p l
+        upper=$(echo "$id" | tr '[:lower:]' '[:upper:]')   # admin → ADMIN
+        user_var="${upper}_USERNAME"
+        pass_var="${upper}_PASSWORD"
+        label_var="${upper}_LABEL"
+        u="${!user_var:-}"
+        p="${!pass_var:-}"
+        l="${!label_var:-}"
+
+        if [ -z "$u" ] || [ -z "$p" ]; then
+            echo "  ⏭  身分 $id：帳密未填，略過"
+            skipped=$((skipped+1))
+            continue
+        fi
+
+        echo ""
+        echo "  ── 身分 $id${l:+ ($l)} ──"
+        docker run --rm "${env_args[@]}" \
+            -e TARGET_URL="$TARGET_URL" \
+            -e REPORTS_RAW_DIR=/reports \
+            -e CURRENT_IDENTITY="$id" \
+            -e CURRENT_USERNAME="$u" \
+            -e CURRENT_PASSWORD="$p" \
+            -e CURRENT_LABEL="$l" \
+            -e COLLECTION_PATH=/workspace/collection.json \
+            -v "$collection:/workspace/collection.json:ro" \
+            -v "$REPORTS_RAW:/reports" \
+            -w /workspace \
+            "testing-pipeline-newman" \
+            || echo "  (newman 結束碼 $?)"
+        ran=$((ran+1))
+    done
+
+    echo ""
+    echo "  身分統計：執行 $ran 輪、略過 $skipped 輪"
+    echo "  報告：$REPORTS_RAW/newman-junit-*.xml（每個身分一份）"
+}
+
+# ─── A4 DB Validation - Seed Data Verification ───
+run_db_test() {
+    enabled db-test || { echo "⏭  A4 DB Validation：略過（無 .testing/unit/fixtures/*.sql）"; return 0; }
+    echo ""
+    echo "▶ A4 DB Validation (Seed Verification)"
+    echo "──────────────────────────────────────────"
+    # 使用 run_unit 的 DB 啟動邏輯
+    start_test_db
+    # 執行驗證腳本
+    docker run --rm \
+        -e TEST_DB_HOST=test-mysql \
+        -e TEST_DB_PORT=3306 \
+        -e TEST_DB_NAME=test \
+        -e TEST_DB_USER=root \
+        -e TEST_DB_PASSWORD=test \
+        -v "$ROOT/tests/unit/validate-db-seeds.sh:/validate.sh:ro" \
+        -v "$REPORTS_RAW:/reports" \
+        --network="$DB_NET" \
+        mysql:8.0 \
+        /bin/bash /validate.sh \
+        || echo "  (db validation 結束碼 $?)"
+    stop_test_db
+    echo "  報告：$REPORTS_RAW/db-validation.json"
+}
+
+# ─── C2 Visual Comparison - 視覺迴歸（Playwright --grep C2）───
+# 若專案的 .testing/e2e/tests/ 沒有 visual.spec.ts，自動 mount pipeline 的通用版
+run_visual_test() {
+    enabled e2e || { echo "⏭  C2 Visual Comparison：略過（需 .testing/e2e/package.json）"; return 0; }
+    echo ""
+    echo "▶ C2 Visual Comparison (Playwright --grep C2)"
+    echo "──────────────────────────────────────────"
+    local env_args=()
+    [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+
+    # 若專案自己沒有 visual.spec.ts，將 pipeline 的通用版以 read-only 疊進去
+    local extra_mount=()
+    if [ ! -s "$PROJECT_PATH/.testing/e2e/tests/visual.spec.ts" ]; then
+        echo "  ℹ️  專案無 visual.spec.ts（或為空檔）→ 使用 pipeline 通用版"
+        extra_mount=(-v "$ROOT/tests/e2e/tests/visual.spec.ts:/e2e/tests/visual.spec.ts:ro")
+    fi
+
+    docker run --rm "${env_args[@]}" "${extra_mount[@]}" \
+        -e TARGET_URL="$TARGET_URL" \
+        -v "$PROJECT_PATH/.testing/e2e:/e2e" \
+        -v "$REPORTS_RAW:/reports" \
+        -w /e2e \
+        mcr.microsoft.com/playwright:v1.59.1-noble \
+        sh -c '
+            if [ -f package-lock.json ]; then
+                npm ci --no-audit --no-fund
+            else
+                npm install --no-audit --no-fund
+            fi && \
+            npx playwright test --grep "C2"
+        ' \
+        || echo "  (playwright --grep C2 結束碼 $?)"
+    echo "  報告：$REPORTS_RAW/playwright/index.html"
+}
+
+# ─── C3 Browser Compatibility - 瀏覽器相容（Playwright --grep C3）───
+# 強制使用 pipeline 的 playwright.config.ts（有三瀏覽器 projects），
+# 覆蓋專案自己的 config（通常只有 chromium）
+run_browser_compat() {
+    enabled e2e || { echo "⏭  C3 Browser Compatibility：略過（需 .testing/e2e/package.json）"; return 0; }
+    echo ""
+    echo "▶ C3 Browser Compatibility (Playwright --grep C3, 三瀏覽器)"
+    echo "──────────────────────────────────────────"
+    local env_args=()
+    [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+
+    local extra_mount=()
+    # 強制疊入 pipeline 的 playwright.config.ts（含 chromium/firefox/webkit）
+    extra_mount+=(-v "$ROOT/tests/e2e/playwright.config.ts:/e2e/playwright.config.ts:ro")
+    # 若專案自己沒有 visual.spec.ts，也疊入通用版
+    if [ ! -s "$PROJECT_PATH/.testing/e2e/tests/visual.spec.ts" ]; then
+        echo "  ℹ️  專案無 visual.spec.ts（或為空檔）→ 使用 pipeline 通用版"
+        extra_mount+=(-v "$ROOT/tests/e2e/tests/visual.spec.ts:/e2e/tests/visual.spec.ts:ro")
+    fi
+
+    docker run --rm "${env_args[@]}" "${extra_mount[@]}" \
+        -e TARGET_URL="$TARGET_URL" \
+        -v "$PROJECT_PATH/.testing/e2e:/e2e" \
+        -v "$REPORTS_RAW:/reports" \
+        -w /e2e \
+        mcr.microsoft.com/playwright:v1.59.1-noble \
+        sh -c '
+            if [ -f package-lock.json ]; then
+                npm ci --no-audit --no-fund
+            else
+                npm install --no-audit --no-fund
+            fi && \
+            npx playwright test --grep "C3"
+        ' \
+        || echo "  (playwright --grep C3 結束碼 $?)"
+    echo "  報告：$REPORTS_RAW/playwright/index.html"
+}
+
 # ─── 02 Precheck - Health Check（日後接 Gate 1：首頁 200/302）───
 run_precheck() {
     echo ""
@@ -491,6 +671,8 @@ case "$SCOPE" in
         run_precheck
         run_static
         run_unit
+        run_api_test
+        run_db_test
         run_links
         run_ssl
         run_trivy
@@ -502,22 +684,27 @@ case "$SCOPE" in
         run_monkey
         run_summary
         ;;
-    precheck)   run_precheck ;;
-    ssl)        run_ssl ;;
-    security)   run_security ;;
-    stress)     run_stress ;;
-    static)     run_static ;;
-    unit)       run_unit ;;
-    e2e)        run_e2e ;;
-    nuclei)     run_nuclei ;;
-    lighthouse) run_lighthouse ;;
-    monkey)     run_monkey ;;
-    trivy)      run_trivy ;;
-    links)      run_links ;;
-    summary)    run_summary ;;
+    precheck)       run_precheck ;;
+    ssl)            run_ssl ;;
+    security)       run_security ;;
+    stress)         run_stress ;;
+    static)         run_static ;;
+    unit)           run_unit ;;
+    e2e)            run_e2e ;;
+    api-test)       run_api_test ;;
+    auth-test)      run_api_test ;;        # B6：共用 A3 的 Newman collection（含 auth/permission test）
+    db-test)        run_db_test ;;
+    visual-test)    run_visual_test ;;     # C2：Playwright --grep C2
+    browser-compat) run_browser_compat ;;  # C3：Playwright --grep C3
+    nuclei)         run_nuclei ;;
+    lighthouse)     run_lighthouse ;;
+    monkey)         run_monkey ;;
+    trivy)          run_trivy ;;
+    links)          run_links ;;
+    summary)        run_summary ;;
     *)
         echo "❌ 未知 scope：$SCOPE"
-        echo "   可用：all | precheck | ssl | security | stress | static | unit | e2e | nuclei | lighthouse | monkey | trivy | links | summary"
+        echo "   可用：all | precheck | ssl | security | stress | static | unit | e2e | api-test | auth-test | db-test | visual-test | browser-compat | nuclei | lighthouse | monkey | trivy | links | summary"
         exit 1
         ;;
 esac
