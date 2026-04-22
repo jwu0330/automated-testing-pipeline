@@ -2,7 +2,7 @@
   "id": "oNnWI3Ohcxh0ptqX",
   "name": "Testing Pipeline — Run Project",
   "description": "線性執行序與 scripts/run-project.sh all 對齊（日後可改平行 Merge）。",
-  "active": false,
+  "active": true,
   "nodes": [
     {
       "parameters": {},
@@ -11,6 +11,24 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [200, -200]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "tp-00000000-0000-0000-0000-000000000022",
+      "name": "Schedule Trigger — 每日 03:00 自動執行",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, -50],
+      "notes": "每天凌晨 3 點（Asia/Taipei）自動觸發；時區來自 GENERIC_TIMEZONE。改排程直接修 cronExpression 即可。"
     },
     {
       "parameters": {
@@ -264,6 +282,9 @@
   ],
   "connections": {
     "Manual Trigger — 手動觸發": {
+      "main": [[{ "node": "01 Init - Set Project Vars", "type": "main", "index": 0 }]]
+    },
+    "Schedule Trigger — 每日 03:00 自動執行": {
       "main": [[{ "node": "01 Init - Set Project Vars", "type": "main", "index": 0 }]]
     },
     "01 Init - Set Project Vars": {

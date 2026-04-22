@@ -46,9 +46,15 @@ docker exec n8n n8n import:workflow --input=/tmp/pipeline.json
 [16 Report → 15 Parse]         ← summarize --json 與 Code 節點
 ```
 
+## 觸發方式
+
+- **Manual Trigger**：開發測試用，按一下 Execute workflow 就跑一次
+- **Schedule Trigger（已內建）**：cron `0 3 * * *` → 每天凌晨 3 點自動執行；時區吃 `GENERIC_TIMEZONE=Asia/Taipei`（見 docker-compose.yml）
+  - 要改時段 → 在節點面板改 cronExpression（例：`0 */6 * * *` = 每 6 小時；`0 3 * * 1-5` = 週一到五 03:00）
+  - 要暫停自動執行 → 右上角把 workflow 的 Active 開關關掉，或刪掉 Schedule Trigger 節點
+
 ## 擴充方向
 
-- **排程**：將 Manual Trigger 換成 Schedule Trigger（每天凌晨 3 點跑）
-- **通知**：串接 Email / Slack / LINE Notify 在失敗時提醒
-- **多專案**：用 Split In Batches 遍歷 `projects.registry.yml`
-- **報告彙整**：用 Read/Write Files 節點把 reports 寄出
+- **通知**：串接 Email / Slack / LINE Notify 在失敗時提醒（建議接在 `Report - Parse Results` 之後，判斷分數 < 閾值再送）
+- **多專案**：用 Split In Batches 遍歷 `projects.registry.yml`，取代 `01 Init - Set Project Vars` 的寫死 projectName
+- **報告彙整**：用 Read/Write Files 節點把 `reports/<name>/report.md` 寄出
