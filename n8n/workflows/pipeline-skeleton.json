@@ -56,14 +56,14 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// 03 Build Options — 把 Sheet 全部列做成 dropdown options + 保留原始 rows 供下游反查\nconst rows = $input.all().map(i => i.json);\nconst options = rows\n  .filter(r => r.project_name)\n  .map(r => ({ option: `${r.project_name}  —  ${r.target_url || '(no url)'}` }));\n\nif (!options.length) {\n  throw new Error('Sheet 讀不到任何 project_name；請檢查 Sheet ID、tab 名稱、欄位 header');\n}\n\nreturn [{ json: { options, allRows: rows } }];"
+        "jsCode": "// 03 Build Options — 把 Sheet 全部列做成 dropdown options + 保留原始 rows 供下游反查\n// 分隔符用純 ASCII ' | '，避免 Unicode 長短 dash 被 n8n UI 正規化導致 05 拆不開\nconst SEP = ' | ';\nconst rows = $input.all().map(i => i.json);\nconst options = rows\n  .filter(r => r.project_name)\n  .map(r => ({ option: `${r.project_name}${SEP}${r.target_url || '(no url)'}` }));\n\nif (!options.length) {\n  throw new Error('Sheet 讀不到任何 project_name；請檢查 Sheet ID、tab 名稱、欄位 header');\n}\n\nreturn [{ json: { options, allRows: rows } }];"
       },
       "id": "tp-03-build-options",
       "name": "03 Build Options",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [500, 0],
-      "notes": "把 Sheet 每一列變成 'project_name  —  target_url' 格式的 dropdown option。allRows 帶到下游供 04 反查。"
+      "notes": "把 Sheet 每一列變成 'project_name | target_url' 格式的 dropdown option。分隔符用 ASCII ' | ' 避免 Unicode dash 被 n8n UI 替換。allRows 帶到下游供 05 反查。"
     },
     {
       "parameters": {
@@ -105,7 +105,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// 05 Resolve Pick → Row\n// 把使用者選的 'project_name  —  target_url' 字串拆回 project_name，從 allRows 撈那一列\nconst pick = $json.projectPick || '';\nconst projectName = pick.split('  —  ')[0].trim();\nconst scopesOverride = ($json.scopesOverride || '').trim();\nconst notifyOverride = ($json.notifyEmailOverride || '').trim();\n\nconst allRows = $('03 Build Options').first().json.allRows || [];\nconst row = allRows.find(r => r.project_name === projectName);\nif (!row) {\n  throw new Error(`找不到 project_name=${projectName}（Sheet 可能在選的當下被改了）`);\n}\n\nconst out = { ...row };\nif (scopesOverride) out.scopes = scopesOverride;\nif (notifyOverride) out.notify_email = notifyOverride;\nreturn [{ json: out }];"
+        "jsCode": "// 05 Resolve Pick → Row\n// 從 'project_name | target_url' 拆出 project_name，從 allRows 撈那一列\n// 防呆：若分隔符被 n8n UI 替換（例如 dash 長短變換），用 startsWith 比對 fallback\nconst pick = ($json.projectPick || '').trim();\nconst scopesOverride = ($json.scopesOverride || '').trim();\nconst notifyOverride = ($json.notifyEmailOverride || '').trim();\n\nconst allRows = $('03 Build Options').first().json.allRows || [];\n\n// 嘗試 1：用我們自己定義的 ' | ' 分隔符拆\nlet projectName = pick.split(' | ')[0].trim();\nlet row = allRows.find(r => r.project_name === projectName);\n\n// 嘗試 2：直接用整個 pick 字串 startsWith 比對 project_name（最穩）\nif (!row) {\n  row = allRows.find(r => r.project_name && pick.startsWith(r.project_name));\n  if (row) projectName = row.project_name;\n}\n\n// 嘗試 3：完全比對 project_name（有人把 pick 改成只剩名字）\nif (!row) {\n  row = allRows.find(r => r.project_name === pick);\n  if (row) projectName = row.project_name;\n}\n\nif (!row) {\n  throw new Error(`找不到專案（pick='${pick}', allRows 有 ${allRows.length} 筆）；請確認 Sheet 內容、欄位名稱 project_name 是否正確`);\n}\n\nconst out = { ...row };\nif (scopesOverride) out.scopes = scopesOverride;\nif (notifyOverride) out.notify_email = notifyOverride;\nreturn [{ json: out }];"
       },
       "id": "tp-05-resolve",
       "name": "05 Resolve Pick → Row",
