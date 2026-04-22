@@ -194,7 +194,7 @@ Sheet 規範與欄位見 [google-sheets-schema.md](./google-sheets-schema.md)。
 Sheet ID / 分頁簽名都已經寫死在 workflow JSON 裡（檔案 `n8n/workflows/pipeline-skeleton.json` 的 `02 Sheet — Read Rows` 節點），`docker exec n8n n8n import:workflow` 會保留這些值，**不會被清掉**。
 
 目前寫死的設定：
-- `documentId`: `11e25IFuf-CtztktJh4pvOaOcB_CQgilLaU6WtEoOeao`（testing-pipeline-batch Sheet）
+- `documentId`: `11e25lFuf-CtztktJh4pvOaOcB_CQgilLaU6WtEoOeao`（testing-pipeline-batch Sheet；注意第 4 個字元是小寫 L 不是大寫 I）
 - `sheetName`: `Sheet1`
 
 Sheet 建立：檔名 `testing-pipeline-batch`，首個 tab 保留預設 `Sheet1`，首列 header 依 [google-sheets-schema.md](./google-sheets-schema.md) 設定。
