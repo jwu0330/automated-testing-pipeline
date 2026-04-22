@@ -80,7 +80,13 @@
         0
       ],
       "onError": "stopWorkflow",
-      "notes": "只讀使用者選中的那一列（project_name 比對 Form 的 projectPick）。綁 Google Sheets credential 後才能執行；Sheet ID 寫死在 JSON 重匯會保留，credential 綁定不在 JSON 裡、每次重匯需手動在 GUI 重選一次。"
+      "credentials": {
+        "googleApi": {
+          "id": "fiuriPKFftRY2Dly",
+          "name": "Google Sheets account 2"
+        }
+      },
+      "notes": "只讀使用者選中的那一列（project_name 比對 Form 的 projectPick）。credential 參照（id + name）已寫死在此節點的 credentials 欄位，重匯 JSON 不會把綁定洗掉。若換 n8n 實例或 credential 被重建，查新 id 後更新這個欄位。"
     },
     {
       "parameters": {
@@ -156,7 +162,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('precheck') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' precheck' : 'echo [SKIP] precheck not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('precheck') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' precheck' : 'echo [SKIP] precheck not in scopes' }}",
         "options": {
           "executionTimeout": 120000
         }
@@ -173,7 +179,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('static') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' static' : 'echo [SKIP] static not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('static') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' static' : 'echo [SKIP] static not in scopes' }}",
         "options": {
           "executionTimeout": 300000
         }
@@ -190,7 +196,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('unit') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' unit' : 'echo [SKIP] unit not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('unit') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' unit' : 'echo [SKIP] unit not in scopes' }}",
         "options": {
           "executionTimeout": 600000
         }
@@ -207,7 +213,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('api-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' api-test' : 'echo [SKIP] api-test not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('api-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' api-test' : 'echo [SKIP] api-test not in scopes' }}",
         "options": {
           "executionTimeout": 600000
         }
@@ -225,7 +231,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('db-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' db-test' : 'echo [SKIP] db-test not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('db-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' db-test' : 'echo [SKIP] db-test not in scopes' }}",
         "options": {
           "executionTimeout": 300000
         }
@@ -242,7 +248,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('links') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' links' : 'echo [SKIP] links not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('links') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' links' : 'echo [SKIP] links not in scopes' }}",
         "options": {
           "executionTimeout": 300000
         }
@@ -259,7 +265,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('ssl') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' ssl' : 'echo [SKIP] ssl not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('ssl') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' ssl' : 'echo [SKIP] ssl not in scopes' }}",
         "options": {
           "executionTimeout": 600000
         }
@@ -276,7 +282,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('trivy') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' trivy' : 'echo [SKIP] trivy not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('trivy') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' trivy' : 'echo [SKIP] trivy not in scopes' }}",
         "options": {
           "executionTimeout": 300000
         }
@@ -293,7 +299,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('lighthouse') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' lighthouse' : 'echo [SKIP] lighthouse not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('lighthouse') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' lighthouse' : 'echo [SKIP] lighthouse not in scopes' }}",
         "options": {
           "executionTimeout": 600000
         }
@@ -310,7 +316,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('e2e') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' e2e' : 'echo [SKIP] e2e not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('e2e') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' e2e' : 'echo [SKIP] e2e not in scopes' }}",
         "options": {
           "executionTimeout": 900000
         }
@@ -327,7 +333,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('visual-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' visual-test' : 'echo [SKIP] visual-test not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('visual-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' visual-test' : 'echo [SKIP] visual-test not in scopes' }}",
         "options": {
           "executionTimeout": 600000
         }
@@ -344,7 +350,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('browser-compat') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' browser-compat' : 'echo [SKIP] browser-compat not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('browser-compat') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' browser-compat' : 'echo [SKIP] browser-compat not in scopes' }}",
         "options": {
           "executionTimeout": 900000
         }
@@ -361,7 +367,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('nuclei') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' nuclei' : 'echo [SKIP] nuclei not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('nuclei') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' nuclei' : 'echo [SKIP] nuclei not in scopes' }}",
         "options": {
           "executionTimeout": 900000
         }
@@ -378,7 +384,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('security') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' security' : 'echo [SKIP] security not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('security') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' security' : 'echo [SKIP] security not in scopes' }}",
         "options": {
           "executionTimeout": 1200000
         }
@@ -395,7 +401,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('stress') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' stress' : 'echo [SKIP] stress not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('stress') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' stress' : 'echo [SKIP] stress not in scopes' }}",
         "options": {
           "executionTimeout": 300000
         }
@@ -412,7 +418,7 @@
     },
     {
       "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopes.includes('monkey') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' monkey' : 'echo [SKIP] monkey not in scopes' }}",
+        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('monkey') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' monkey' : 'echo [SKIP] monkey not in scopes' }}",
         "options": {
           "executionTimeout": 600000
         }

@@ -183,15 +183,20 @@ Sheet 規範與欄位見 [google-sheets-schema.md](./google-sheets-schema.md)。
 
 ### 首次設定
 
-匯入 workflow 後，需要在 n8n GUI 做**一件事**才能實際跑：
+匯入 workflow 後，需要在 n8n GUI 做**一次性**設定：
 
-1. **綁 Google Sheets credential**：打開 `02 Sheet — Read Selected Row` 節點 → Credentials → 新增 Google Sheets OAuth → 授權你的 Google 帳號
+1. **建立 Google Sheets credential**：Credentials 頁面 → 新增 Google Sheets OAuth2 或 Service Account（本 workflow 用 Service Account / `googleApi` 型）→ 授權
+2. **確認 credential id 與 JSON 一致**：
+   - 查 id：`docker exec n8n n8n export:credentials --all 2>&1 | grep -v Permissions | head -c 500`
+   - 比對 workflow JSON `02 Sheet — Read Selected Row` 節點的 `credentials.googleApi.id` 是否相同
+   - 若不同（例如你新建的 credential id 不是 `fiuriPKFftRY2Dly`），改 JSON 的 id 重匯即可
 
-Sheet ID / 分頁簽名都已經寫死在 workflow JSON 裡（檔案 `n8n/workflows/pipeline-skeleton.json` 的 `02 Sheet — Read Selected Row` 節點），`docker exec n8n n8n import:workflow` 會保留這些值，**不會被清掉**。
+Sheet ID / 分頁名 / credential id 都寫死在 workflow JSON 裡，`docker exec n8n n8n import:workflow` 會保留這些值，**不會被清掉**。
 
 目前寫死的設定：
 - `documentId`: `11e25lFuf-CtztktJh4pvOaOcB_CQgilLaU6WtEoOeao`（testing-pipeline-batch Sheet；注意第 4 個字元是小寫 L 不是大寫 I）
 - `sheetName`: `Sheet1`
+- `credentials.googleApi.id`: `fiuriPKFftRY2Dly`（此實例的 `Google Sheets account 2`）
 
 Sheet 建立：檔名 `testing-pipeline-batch`，首個 tab 保留預設 `Sheet1`，首列 header 依 [google-sheets-schema.md](./google-sheets-schema.md) 設定。
 
@@ -249,12 +254,13 @@ n8n 某些節點有**必填欄位**，漏填會在 GUI 顯示紅色三角警告�
 - `parameters.operation`：`"read"` / `"append"` / ...
 - `parameters.documentId`：`{ "__rl": true, "value": "...", "mode": "id" }`（**不是直接寫字串**，必須包 resourceLocator 物件）
 - `parameters.sheetName`：`{ "__rl": true, "value": "Sheet1", "mode": "name" }`（或 `"mode": "list"` + `value: gid`）
-- `credentials`：必須綁 Google Sheets OAuth credential，無法純 JSON 設定，**要在 GUI 點一次綁定**
-- **重要：每次跑 `n8n import:workflow` 重匯 JSON 後，credential 綁定會被清掉**（錯誤訊息：`Node does not have any credentials set`）。每次重匯後都要：
-  1. 開 `02 Sheet — Read Selected Row` 節點 → Credential 下拉選原本的 Google Sheets account
-  2. 按 **Execute step** 驗證能讀到資料
-  3. 右上角按 **Save** 儲存 workflow（不只是關視窗）
-- 這是 n8n 的設計限制（credential ID 存資料庫不存 JSON），所以迭代開發時改 JSON 後請預留這個手動步驟
+- `credentials`：Google Sheets / Google API 類節點要綁 OAuth credential
+- **credential 綁定可以寫進 JSON**（早期誤判為不行）：在節點加 `"credentials": { "googleApi": { "id": "<id>", "name": "<name>" } }`；重匯 JSON 不會清掉
+- 第一次建立 credential 必須手動在 GUI 做（OAuth 授權流程無法自動化）。之後：
+  1. 查 credential id：`docker exec n8n n8n export:credentials --all 2>&1 | grep -v Permissions | head -c 500` — 只看 id / name / type，不要用 `--decrypted`（會吐 private key 到螢幕）
+  2. 複製到節點 JSON 的 `credentials` 欄位
+  3. 以後重匯就不會再掉綁定
+- 如果真的被清掉（例如換 n8n 實例、credential 被重建）：開節點 → Credential 下拉重選 → Execute step 驗證 → Save
 
 #### `n8n-nodes-base.executeCommand` (typeVersion 1)
 
