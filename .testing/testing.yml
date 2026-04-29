@@ -48,8 +48,6 @@ project:
 #     pages: [/, /login.html]             # 預設 [/]
 #   static:
 #     level: 7                            # 預設 5
-#   unit:
-#     enabled: false                      # 偵測到但強制關掉
 #   e2e:
 #     auth:
 #       enabled: true
@@ -57,11 +55,9 @@ project:
 #       password_env: E2E_PASSWORD
 #     multi_browser: false                # 若要 firefox/webkit，改為 true（配合 playwright.config.ts）
 #
-#   # ─── A3 API 驗證 + A4 DB 驗證 ───
+#   # ─── A3 API 驗證 ───
 #   api-test:
 #     enabled: true                       # 有 .testing/api/collections/ 就自動啟用
-#   db-test:
-#     enabled: true                       # 有 .testing/unit/fixtures/ 就自動啟用
 #
 #   # ─── v0.3 新增的 5 個通用測試 ───
 #   nuclei:

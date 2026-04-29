@@ -6,11 +6,11 @@
 #   bash scripts/run-project.sh <name> [scope]
 #
 # scope:
-#   all (預設) | ssl | security | stress | static | unit | e2e
+#   all (預設) | ssl | security | stress | static | e2e
 #   nuclei | lighthouse | monkey | trivy | links | precheck | summary
 #
 # all 的執行序（直線；日後改平行仍沿用此編號／命名）：
-#   02 Precheck → 03 Static → 04 Unit → 05 Lychee → 06 SSL → 07 Trivy
+#   02 Precheck → 03 Static → 05 Lychee → 06 SSL → 07 Trivy
 #   → 08 Lighthouse → 09 E2E → 10 Nuclei → 11 ZAP → 12 Load → 13 Monkey
 #   → 14–16 Report（summarize.js）
 #
@@ -18,6 +18,7 @@
 #   - testing.yml 只需 4 個必填欄位（name / target_url / local_path / php_version）
 #   - 其他測試開關走自動偵測，testing.yml 只寫「要覆寫」的部分
 #   - local_path 為空 → 只跑 URL-based 測試（ssl/security/stress）
+#   - 單元測試由各專案自行管理（不歸 pipeline 跑）
 #   - 原始工具輸出放 reports/<name>/raw/；summarize.js 會產生統一 report.md
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -30,8 +31,8 @@ if [ -z "$NAME" ]; then
     echo ""
     echo "scope 可以是："
     echo "  Preset：all | remote-only | local-only"
-    echo "  單一：  precheck | ssl | security | stress | static | unit | e2e"
-    echo "          api-test | auth-test | db-test | visual-test | browser-compat"
+    echo "  單一：  precheck | ssl | security | stress | static | e2e"
+    echo "          api-test | auth-test | visual-test | browser-compat"
     echo "          nuclei | lighthouse | monkey | trivy | links | summary"
     echo "  多選：  以逗號分隔，例如 ssl,e2e,lighthouse"
     exit 1
@@ -77,8 +78,8 @@ if [ -z "$LOCAL_PATH" ] || [ "$LOCAL_PATH" = '""' ]; then
 else
     PROJECT_PATH="$LOCAL_PATH"
     if [ ! -d "$PROJECT_PATH" ]; then
-        echo "⚠️  local_path 不存在：$PROJECT_PATH → 降級為 URL-only 模式（skip static/unit/trivy/db-test）"
-        WARNINGS+=("local_path 不存在：$PROJECT_PATH → 跳過 static/unit/trivy/db-test")
+        echo "⚠️  local_path 不存在：$PROJECT_PATH → 降級為 URL-only 模式（skip static/trivy）"
+        WARNINGS+=("local_path 不存在：$PROJECT_PATH → 跳過 static/trivy")
         PROJECT_PATH=""
         LOCAL_MODE=false
     else
@@ -179,17 +180,6 @@ enabled() {
                 return 1
             fi
             ;;
-        unit)
-            if ! $LOCAL_MODE; then
-                WARNINGS+=("unit：local_path 未設/不存在，跳過 PHPUnit")
-                return 1
-            fi
-            if [ ! -f "$PROJECT_PATH/.testing/unit/phpunit.xml" ]; then
-                WARNINGS+=("unit：未偵測到 .testing/unit/phpunit.xml，跳過 PHPUnit")
-                return 1
-            fi
-            return 0
-            ;;
         e2e)
             if ! $LOCAL_MODE; then
                 WARNINGS+=("e2e：local_path 未設/不存在，跳過 Playwright")
@@ -224,17 +214,6 @@ enabled() {
             # 附加檢查 admin 帳密
             if [ -z "${ADMIN_USERNAME:-}" ] || [ -z "${ADMIN_PASSWORD:-}" ]; then
                 WARNINGS+=("api-test：ADMIN_USERNAME/PASSWORD 未提供，API/Auth 測試身分可能不完整")
-            fi
-            return 0
-            ;;
-        db-test)
-            if ! $LOCAL_MODE; then
-                WARNINGS+=("db-test：local_path 未設/不存在，跳過 DB 驗證")
-                return 1
-            fi
-            if ! ls "$PROJECT_PATH/.testing/unit/fixtures"/*.sql >/dev/null 2>&1; then
-                WARNINGS+=("db-test：未偵測到 .testing/unit/fixtures/*.sql，跳過 DB 驗證")
-                return 1
             fi
             return 0
             ;;
@@ -321,97 +300,6 @@ run_static() {
                 --no-progress \
         > "$REPORTS_RAW/phpstan.json" || true
     echo "  報告：$REPORTS_RAW/phpstan.json"
-}
-
-# ─── 測試 DB 生命週期：啟動 / 停止 test-mysql ────
-DB_NET="atp-test-net"
-
-start_test_db() {
-    echo "  ▶ 啟動測試 DB（mysql:8.0, tmpfs）..."
-    docker compose --profile unit-db up -d test-mysql
-    # 等到 root 認證真的 ready（healthcheck 會在 socket 開啟時就 pass，但
-    # MYSQL_ROOT_PASSWORD 的 user 初始化稍晚完成，用真實 SELECT 驗證才可靠）
-    local tries=45
-    until docker compose exec -T test-mysql mysql -uroot -ptest -e "SELECT 1" >/dev/null 2>&1; do
-        tries=$((tries-1))
-        [ $tries -le 0 ] && { echo "  ❌ test-mysql auth timeout"; return 1; }
-        sleep 1
-    done
-    echo "  ✓ test-mysql ready（auth OK）"
-    # 載入 schema（若專案有 database/init.sql）
-    if [ -f "$PROJECT_PATH/database/init.sql" ]; then
-        echo "  載入 schema：database/init.sql"
-        docker compose exec -T test-mysql mysql -uroot -ptest test < "$PROJECT_PATH/database/init.sql" || echo "  (init.sql 載入有警告)"
-    fi
-    # 載入 fixtures（.testing/unit/fixtures/*.sql）
-    local loaded=0
-    for f in "$PROJECT_PATH/.testing/unit/fixtures"/*.sql; do
-        [ -e "$f" ] || continue
-        echo "  載入 fixture：$(basename "$f")"
-        docker compose exec -T test-mysql mysql -uroot -ptest test < "$f"
-        loaded=$((loaded+1))
-    done
-    if [ $loaded -eq 0 ]; then
-        echo "  （無 fixtures 檔）"
-    fi
-}
-
-stop_test_db() {
-    echo "  ▶ 關閉測試 DB..."
-    docker compose --profile unit-db down -v >/dev/null 2>&1 || true
-}
-
-# ─── 04 Code - Unit Tests ───
-run_unit() {
-    enabled unit || { echo "⏭  04 Code - Unit Tests：略過（無 .testing/unit/phpunit.xml）"; return 0; }
-    echo ""
-    echo "▶ 04 Code - Unit Tests (PHPUnit + pcov)"
-    echo "──────────────────────────────────────────"
-    local image="testing-pipeline-phpunit:php${PHP_VERSION}"
-    if ! docker image inspect "$image" >/dev/null 2>&1; then
-        echo "  首次建置 $image..."
-        docker build --build-arg PHP_VERSION="$PHP_VERSION" -t "$image" "$ROOT/tests/unit/"
-    fi
-
-    # 偵測是否要 DB：有 fixtures 或 testing.yml 明示
-    local use_db=false
-    if ls "$PROJECT_PATH/.testing/unit/fixtures"/*.sql >/dev/null 2>&1; then
-        use_db=true
-    fi
-    local db_ov
-    db_ov=$(yq -r '.tests.unit.use_db // ""' "$TESTING_YML")
-    [ "$db_ov" = "true" ]  && use_db=true
-    [ "$db_ov" = "false" ] && use_db=false
-
-    local db_args=()
-    local env_args=()
-    [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
-
-    if $use_db; then
-        start_test_db
-        db_args=(
-            --network="$DB_NET"
-            -e TEST_DB_HOST=test-mysql
-            -e TEST_DB_PORT=3306
-            -e TEST_DB_NAME=test
-            -e TEST_DB_USER=root
-            -e TEST_DB_PASSWORD=test
-        )
-    fi
-
-    docker run --rm "${env_args[@]}" "${db_args[@]}" \
-        -v "$PROJECT_PATH:/project" \
-        -v "$REPORTS_RAW:/reports" \
-        "$image" \
-            --log-junit=/reports/phpunit.xml \
-            --coverage-html=/reports/coverage \
-            --coverage-clover=/reports/phpunit-clover.xml \
-            --coverage-text=/reports/phpunit-coverage.txt \
-        || echo "  (phpunit 結束碼 $?)"
-
-    $use_db && stop_test_db
-
-    echo "  報告：$REPORTS_RAW/phpunit.xml、$REPORTS_RAW/coverage/index.html"
 }
 
 # ─── 09 Web - E2E Tests ───
@@ -633,31 +521,6 @@ run_api_test() {
     echo "  報告：$REPORTS_RAW/newman-junit-*.xml（每個身分一份）"
 }
 
-# ─── A4 DB Validation - Seed Data Verification ───
-run_db_test() {
-    enabled db-test || { echo "⏭  A4 DB Validation：略過（無 .testing/unit/fixtures/*.sql）"; return 0; }
-    echo ""
-    echo "▶ A4 DB Validation (Seed Verification)"
-    echo "──────────────────────────────────────────"
-    # 使用 run_unit 的 DB 啟動邏輯
-    start_test_db
-    # 執行驗證腳本
-    docker run --rm \
-        -e TEST_DB_HOST=test-mysql \
-        -e TEST_DB_PORT=3306 \
-        -e TEST_DB_NAME=test \
-        -e TEST_DB_USER=root \
-        -e TEST_DB_PASSWORD=test \
-        -v "$ROOT/tests/unit/validate-db-seeds.sh:/validate.sh:ro" \
-        -v "$REPORTS_RAW:/reports" \
-        --network="$DB_NET" \
-        mysql:8.0 \
-        /bin/bash /validate.sh \
-        || echo "  (db validation 結束碼 $?)"
-    stop_test_db
-    echo "  報告：$REPORTS_RAW/db-validation.json"
-}
-
 # ─── C2 Visual Comparison - 視覺迴歸（Playwright --grep C2）───
 # 若專案的 .testing/e2e/tests/ 沒有 visual.spec.ts，自動 mount pipeline 的通用版
 run_visual_test() {
@@ -756,9 +619,9 @@ run_summary() {
 }
 
 # ─── Preset 展開：ALL / REMOTE_ONLY / LOCAL_ONLY → 具體 scope 列表 ────
-ALL_SCOPES="precheck,static,unit,api-test,db-test,links,ssl,trivy,lighthouse,e2e,nuclei,security,stress,monkey,summary"
+ALL_SCOPES="precheck,static,api-test,links,ssl,trivy,lighthouse,e2e,nuclei,security,stress,monkey,summary"
 REMOTE_SCOPES="precheck,ssl,security,nuclei,stress,lighthouse,links,monkey,summary"
-LOCAL_SCOPES="static,unit,trivy,db-test,summary"
+LOCAL_SCOPES="static,trivy,summary"
 
 expand_preset() {
     case "$1" in
@@ -777,11 +640,9 @@ run_scope() {
         security)       run_security ;;
         stress)         run_stress ;;
         static)         run_static ;;
-        unit)           run_unit ;;
         e2e)            run_e2e ;;
         api-test)       run_api_test ;;
         auth-test)      run_api_test ;;        # B6：共用 A3 的 Newman collection
-        db-test)        run_db_test ;;
         visual-test)    run_visual_test ;;     # C2：Playwright --grep C2
         browser-compat) run_browser_compat ;;  # C3：Playwright --grep C3
         nuclei)         run_nuclei ;;

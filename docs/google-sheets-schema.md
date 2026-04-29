@@ -15,7 +15,7 @@
 |---|---|---|---|
 | `project_name` | ✅ | `testing.yml:project.name` + registry key | 英數底線（例 `babydodofun`）；同名會覆寫上次設定 |
 | `target_url` | ✅ | `testing.yml:project.target_url` | `https://...`；缺則該列直接拒絕（n8n Precheck 節點 throw） |
-| `local_path` | | `testing.yml:project.local_path` | 絕對路徑；空或不存在 → skip `static / unit / trivy / db-test`，並記錄 warning |
+| `local_path` | | `testing.yml:project.local_path` | 絕對路徑；空或不存在 → skip `static / trivy`，並記錄 warning |
 | `php_version` | | `testing.yml:project.php_version` | 非 PHP 專案留空即走預設 `8.1` |
 | `scopes` | ✅ | `run-project.sh` 第 2 參數 | 逗號分隔 scope 或 preset（`ALL` / `REMOTE_ONLY` / `LOCAL_ONLY`） |
 | `admin_username` | | `.env:ADMIN_USERNAME` | 缺 → api-test / auth-test 身分可能不完整 |
@@ -37,11 +37,11 @@
 **Preset**（由 n8n `01 Normalize Input` 展開為具體 scope 清單）：
 - `ALL`：全部 14+ 種測試
 - `REMOTE_ONLY`：僅遠端測試（`precheck, ssl, security, nuclei, stress, lighthouse, links, monkey`）
-- `LOCAL_ONLY`：僅本地測試（`static, unit, trivy, db-test`）
+- `LOCAL_ONLY`：僅本地測試（`static, trivy`）
 
-**單項**：`precheck, static, unit, api-test, auth-test, db-test, ssl, security, nuclei, trivy, stress, e2e, visual-test, browser-compat, lighthouse, links, monkey, summary`
+**單項**：`precheck, static, api-test, auth-test, ssl, security, nuclei, trivy, stress, e2e, visual-test, browser-compat, lighthouse, links, monkey, summary`
 
-**組合範例**：`ssl,e2e,lighthouse` / `REMOTE_ONLY` / `static,unit,trivy`
+**組合範例**：`ssl,e2e,lighthouse` / `REMOTE_ONLY` / `static,trivy`
 
 ## 範例列
 
@@ -49,7 +49,7 @@
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | babydodofun | https://xcity.babydodofun.com | /mnt/e/cwe/b12/babydodofun | 8.1 | ALL | admin001 | @admin001 | admin001 | @admin001 | qa@example.com | true | 全測 |
 | landingpage | https://landing.example.com | | | REMOTE_ONLY | | | | | | true | 純 URL |
-| legacy_site | https://legacy.example.com | /srv/legacy | 7.4 | static,unit,ssl | root | secret | | | dev@example.com | true | 只驗本地 + SSL |
+| legacy_site | https://legacy.example.com | /srv/legacy | 7.4 | static,trivy,ssl | root | secret | | | dev@example.com | true | 只驗本地 + SSL |
 | disabled_row | https://skip.example.com | | | ALL | | | | | | false | 先關掉 |
 
 ## 執行策略

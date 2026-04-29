@@ -150,32 +150,6 @@ services:
       - all
 
   # ─────────────────────────────────────
-  # 測試 DB（可選）— PHPUnit 整合測試用
-  # 只在 run-project.sh 偵測到 .testing/unit/fixtures/*.sql 時啟動
-  # 特性：
-  #   - tmpfs：資料寫 RAM，每次啟動都是乾淨狀態
-  #   - atp-test-net：phpunit 容器靠這個網路連進來
-  #   - root 密碼寫死 test：反正每次跑完就丟
-  # ─────────────────────────────────────
-  test-mysql:
-    image: mysql:8.0
-    container_name: test-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: test
-      MYSQL_DATABASE: test
-    tmpfs:
-      - /var/lib/mysql
-    networks:
-      - test-net
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-ptest", "--silent"]
-      interval: 2s
-      timeout: 3s
-      retries: 20
-    profiles:
-      - unit-db
-
-  # ─────────────────────────────────────
   # E2E 測試 (Playwright) — 通用骨架
   # 註：專案客製的 E2E 由 scripts/run-project.sh 直接 docker run 執行，
   #     本 service 僅用於流水線骨架本身的驗證。
@@ -244,9 +218,3 @@ volumes:
   # 不指定 name，讓 compose 沿用預設命名 `<project>_n8n_data`
   # 即 `automated-testing-pipeline_n8n_data`，與既有 volume 匹配
   n8n_data:
-
-networks:
-  # test-net 給 test-mysql 與 phpunit 連線用。
-  # 顯式命名 atp-test-net，避免 compose 預設名稱隨目錄變動導致 docker run --network 找不到
-  test-net:
-    name: atp-test-net

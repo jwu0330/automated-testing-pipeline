@@ -15,7 +15,8 @@
 | **資料夾名稱** | 固定 `.testing/`（以點開頭） | 表示「測試設定」非業務程式碼；IDE 會摺疊 |
 | **路徑** | 專案根目錄，與 `index.php` 或 `composer.json` 同層 | 方便自動偵測 |
 | **必填欄位** | `testing.yml` 只需 4 個欄位 | 其餘走智慧預設 |
-| **測試碼位置** | `.testing/unit/` 與 `.testing/e2e/` 在**專案**裡 | pipeline 只 bind mount，不持有副本 |
+| **測試碼位置** | `.testing/e2e/` 與 `.testing/api/` 在**專案**裡 | pipeline 只 bind mount，不持有副本 |
+| **單元測試** | 由專案自己的測試資料夾管理（不在 `.testing/`） | pipeline 只跑黑箱／行為測試 |
 | **執行入口** | `bash scripts/run-project.sh <name>` | 單一指令 |
 
 ---
@@ -30,24 +31,24 @@
     ├── .env.example             # ☐ 選填（告訴下一個人要填什麼）
     ├── README.md                # ☐ 選填（專案測試說明）
     │
-    ├── unit/                    # ☐ 自動偵測
-    │   ├── phpunit.xml          # 有此檔 → 自動啟用 unit 測試
-    │   ├── bootstrap.php
-    │   ├── tests/*.php          # 專案自己寫的測試
-    │   └── fixtures/*.sql       # 有 .sql → 自動啟動 test-mysql 容器
-    │
     ├── e2e/                     # ☐ 自動偵測
     │   ├── package.json         # 有此檔 → 自動啟用 e2e 測試
     │   ├── playwright.config.ts
     │   └── tests/*.spec.ts
     │
+    ├── api/                     # ☐ 自動偵測
+    │   └── collections/
+    │       └── *.postman_collection.json  # 有此檔 → 自動啟用 api-test
+    │
     └── static/                  # ☐ 選填
         └── phpstan.neon         # 覆寫流水線預設
 ```
 
+> **單元測試不在這裡**：請於專案自己的測試資料夾（例：`tests/`）撰寫並執行；pipeline 不接管 PHPUnit / DB seed 驗證。
+
 ### 重要
 
-- 測試碼（`unit/tests/`、`e2e/tests/`）留在專案 git repo，**流水線不複製**。pipeline 執行時 `docker run -v <project>:/project` bind mount 進容器。
+- 測試碼（`e2e/tests/`、`api/collections/`）留在專案 git repo，**流水線不複製**。pipeline 執行時 `docker run -v <project>:/project` bind mount 進容器。
 - 原始碼**不要**放進 `.testing/`。
 - `.testing/` 應納入 Git 版控（除了 `.env`）。
 
@@ -75,8 +76,8 @@ project:
 |------|------|
 | `project.name` | 唯一識別名稱（英數底線），用於 `reports/<name>/`、n8n 選單 |
 | `project.target_url` | 線上測試目標 URL（SSL/ZAP/k6/E2E 指向這） |
-| `project.local_path` | 本地原始碼絕對路徑。**留空或設 `""` → 只跑網路測試（SSL/Security/Stress）**，不跑 static/unit/e2e |
-| `project.php_version` | PHP 版本（決定 PHPUnit Docker image）。非 PHP 專案留預設 `"8.1"` 即可 |
+| `project.local_path` | 本地原始碼絕對路徑。**留空或設 `""` → 只跑網路測試（SSL/Security/Stress）**，不跑 static/trivy |
+| `project.php_version` | PHP 版本（保留欄位以利未來工具切版）。非 PHP 專案留預設 `"8.1"` 即可 |
 
 ### 3.3 自動偵測規則
 
@@ -88,9 +89,8 @@ project:
 | `security` | 一律啟用（ZAP baseline） |
 | `stress` | 一律啟用（vus=10, duration=30s, pages=[`/`]） |
 | `static` | `local_path` 不為空且掃描到 `.php` 檔（level=5） |
-| `unit` | `.testing/unit/phpunit.xml` 存在 |
 | `e2e` | `.testing/e2e/package.json` 存在 |
-| `unit.use_db` | `.testing/unit/fixtures/*.sql` 存在 → 自動啟動 `test-mysql` 容器 |
+| `api-test` | `.testing/api/collections/*.postman_collection.json` 存在 |
 | `nuclei` | 一律啟用（severity=critical,high,medium, rate_limit=50） |
 | `lighthouse` | 一律啟用（preset=desktop, pages=[`/`]） |
 | `monkey` | 一律啟用（pages=[`/`], attacks=500, delay_ms=10） |
@@ -106,8 +106,6 @@ tests:
     pages: [/, /login.html]       # 覆寫預設 [/]
   static:
     level: 7                      # 覆寫預設 5
-  unit:
-    enabled: false                # 偵測到但強制關掉
 ```
 
 **原則：沉默 = 用預設。**
@@ -128,94 +126,11 @@ tests:
 
 ---
 
-## 5. DB 整合測試（option B — pipeline 管 MySQL）
+## 5. 單元測試與 DB 整合測試（不在 pipeline）
 
-### 5.1 設計
-
-當專案有 DB 相關測試時，**禁止連 production DB**。pipeline 提供獨立 MySQL 容器（寫在 tmpfs，每次跑完銷毀）：
-
-```
-.testing/unit/fixtures/*.sql   存在
-   ↓ 自動觸發
-pipeline 啟動 test-mysql 容器（profile=unit-db）
-   ↓
-載入 <project>/database/init.sql（schema）
-   ↓
-載入 .testing/unit/fixtures/*.sql（測試資料）
-   ↓
-phpunit 容器加入 atp-test-net 網路
-   ↓ env 變數：
-TEST_DB_HOST=test-mysql
-TEST_DB_PORT=3306
-TEST_DB_NAME=test
-TEST_DB_USER=root
-TEST_DB_PASSWORD=test
-   ↓
-跑測試
-   ↓
-test-mysql 容器銷毀（資料隨 tmpfs 清空）
-```
-
-### 5.2 在測試中使用
-
-`.testing/unit/bootstrap.php` 從範本複製 `testDb()` helper，測試類別內：
-
-```php
-public function testSomething(): void {
-    $pdo = testDb();                         // 拿 PDO
-    $pdo->exec('INSERT INTO members ...');   // 寫資料
-    // assert ...
-}
-```
-
-### 5.3 Fixtures 撰寫
-
-```sql
--- .testing/unit/fixtures/001_test_users.sql
-INSERT INTO m_members (id, phone, name) VALUES
-  (1, '0911111111', '測試用戶1'),
-  (2, '0922222222', '測試用戶2');
-```
-
-Pipeline 啟動時會依檔名順序載入。若 init.sql 已有 seed 資料可能碰撞，慣例是在最前面放 `00_reset.sql`（TRUNCATE 相關表後 fixtures 成為唯一真相源）。
-
-### 5.4 **專案必須支援的合約**（重要）
-
-pipeline 用環境變數注入測試 DB 連線；但若專案的原始碼有「設定檔優先於環境變數」的邏輯（例：讀 `config.local.php`），測試會被卡在 production 的 localhost。為了讓 DB 整合測試可用，專案的 env loader **必須遵守以下合約**：
-
-| 合約 | 說明 |
-|------|------|
-| `APP_ENV=testing` 時跳過本地 config 檔 | PHPUnit 的 `phpunit.xml` 預設會設 `<env name="APP_ENV" value="testing"/>`；專案的 `env()` 看到這個值時，必須跳過讀取含 production 憑證的檔（如 `private/config.local.php`），改走 `getenv()` → 這樣 pipeline 注入的 `TEST_DB_HOST=test-mysql` 才能生效 |
-| DB 連線名稱不 hard-code | `db()` 等函式必須從 `env()` 拿 DB_HOST/PORT/NAME/USER/PASS，不要寫死字串 |
-| 不在頂層執行副作用 | 被 require 時不要連 DB、不要呼叫外部 API、不要 echo 輸出（lazy init 一切） |
-
-**範例：babydodofun 的 env.php**
-
-```php
-function env(string $key, string $default = ''): string
-{
-    static $cfg = null;
-    if ($cfg === null) {
-        if (getenv('APP_ENV') === 'testing') {
-            $cfg = [];  // ★ 測試模式跳過 config 檔
-        } else {
-            $path = __DIR__ . '/../../private/config.local.php';
-            $cfg = file_exists($path) ? (require $path) : [];
-        }
-    }
-    return $cfg[$key] ?? (getenv($key) ?: $default);
-}
-```
-
-不做這件事，DB 整合測試會連到專案的生產 localhost 憑證（嘗試連不存在的 MySQL socket），不只測試失敗，還可能在有 DNS 解析的環境意外打到真實 DB。
-
-### 5.5 避免測試資料與 fixture 碰撞
-
-專案的整合測試若要用 `INSERT INTO m_members` 建測試用會員，`member_no` / `phone` 等唯一鍵必須避開 fixtures 已有的值。慣例：
-
-- **`member_no`** 用未來日期前綴（如 `+2 years`），fixtures 用今日往回推 → 不會撞
-- **`phone`** 用 `09` + 隨機 8 碼，fixtures 也是隨機 → 碰撞機率極低
-- 整合測試基底類別（如 babydodofun 的 `IntegrationTestCase`）在 `tearDownAfterClass` 清掉自己建的資料
+> 這些屬於專案自己的測試範疇，**pipeline 不接管**。請在專案自己的測試資料夾（例：`tests/`）使用 PHPUnit 等工具撰寫並執行；連線測試用 DB 也由專案自行管理。
+>
+> Pipeline 專注於黑箱／行為測試（API、E2E、SSL、Security、壓力、視覺迴歸…），詳見下節。
 
 ---
 
@@ -231,8 +146,9 @@ function env(string $key, string $default = ''): string
 | 連結檢查 (Lychee) | 通用 | 流水線（可調 timeout/exclude） |
 | 靜態分析 (PHPStan) | 通用 | 流水線（可客製 `.testing/static/phpstan.neon`） |
 | 供應鏈 (Trivy) | 通用 | 流水線（需 `local_path`） |
-| **單元測試 (PHPUnit)** | **客製** | **專案自己寫在 `.testing/unit/`** |
+| **API 測試 (Newman / Postman)** | **客製** | **專案自己寫在 `.testing/api/collections/`** |
 | **E2E (Playwright)** | **客製** | **專案自己寫在 `.testing/e2e/`** |
+| 單元測試 | 不在 pipeline | 由專案自己的測試資料夾管理 |
 | 互動探測 (Gremlins monkey) | 通用 | 流水線（可調 pages/attacks/delay_ms） |
 
 ---
@@ -266,7 +182,8 @@ bash /path/to/pipeline/scripts/run-project.sh new_project
 ```bash
 bash scripts/run-project.sh <name>             # 全部
 bash scripts/run-project.sh <name> ssl         # 只 SSL
-bash scripts/run-project.sh <name> unit        # 只 Unit
+bash scripts/run-project.sh <name> api-test    # 只 API
+bash scripts/run-project.sh <name> e2e         # 只 E2E
 bash scripts/run-project.sh <name> summary     # 只重新產生 report.md
 ```
 
@@ -284,8 +201,7 @@ automated-testing-pipeline/reports/<project>/
     ├── phpstan.json
     ├── zap-report.json
     ├── k6-summary.json
-    ├── phpunit.xml
-    ├── coverage/
+    ├── newman-junit-*.xml
     └── playwright/
 ```
 
@@ -297,8 +213,7 @@ automated-testing-pipeline/reports/<project>/
 - [ ] 建 `.testing/testing.yml`（4 個必填）
 - [ ] `bash scripts/register-project.sh <name> <path>`
 - [ ] 驗證：`bash scripts/run-project.sh <name> ssl`
-- [ ] 若要 unit 測試：在 `.testing/unit/` 放 `phpunit.xml` + `bootstrap.php` + `tests/*.php`
-- [ ] 若 unit 測試要 DB：在 `.testing/unit/fixtures/*.sql` 放種子資料
+- [ ] 若要 API 測試：在 `.testing/api/collections/` 放 `*.postman_collection.json`，並在 `.testing/.env` 填 `ADMIN_*` / `USER*_*` 帳密
 - [ ] 若要 e2e：在 `.testing/e2e/` 放 `package.json` + `playwright.config.ts` + `tests/*.spec.ts`
 - [ ] 跑全套：`bash scripts/run-project.sh <name>`
 
@@ -307,16 +222,16 @@ automated-testing-pipeline/reports/<project>/
 ## 10. FAQ
 
 **Q：`local_path` 留空會怎樣？**
-A：SSL / Security / Stress 照跑（這些只要 URL）；Static / Unit / E2E 自動略過（沒有源碼可測）。適合「只想檢查線上網站」的情境。
+A：SSL / Security / Stress / API / E2E 照跑（這些只要 URL）；Static / Trivy 自動略過（沒有源碼可掃）。適合「只想檢查線上網站」的情境。
 
-**Q：一定要用 production DB 測嗎？**
-A：**絕對不要**。Pipeline 提供獨立測試 DB 容器（option B），production DB 永遠不該被自動化測試碰到。
+**Q：單元測試呢？**
+A：不在 pipeline 裡。請在專案自己的測試資料夾（例：`tests/`）以 PHPUnit 等工具自行執行；pipeline 專注於黑箱／行為測試。
 
 **Q：我想新增 Python/Node 專案？**
-A：SSL/Security/Stress/E2E 對語言無關，立刻可用。Static/Unit 目前只支援 PHP（PHPStan + PHPUnit），未來再擴充。
+A：SSL/Security/Stress/API/E2E 對語言無關，立刻可用。Static 目前只支援 PHP（PHPStan），未來再擴充。
 
 **Q：共享主機有什麼限制？**
-A：Stress `vus` 建議 ≤ 10；Static/Unit 完全在本機 Docker 跑，不連遠端。
+A：Stress `vus` 建議 ≤ 10；Static 完全在本機 Docker 跑，不連遠端。
 
 **Q：v1 的 testing.yml 還能用嗎？**
 A：能。`run-project.sh` 偵測到 v1 會用 registry 的 path 當 local_path；但建議遷移到 v2（少寫 30 行）。

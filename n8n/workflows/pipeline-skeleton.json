@@ -6,28 +6,10 @@
   "nodes": [
     {
       "parameters": {
-        "formTitle": "Testing Pipeline",
-        "formDescription": "選擇要跑測試的專案。新增 Sheet 列後請同步更新此節點的 projectPick options。",
+        "formTitle": "Testing Pipeline — Step 1/2",
+        "formDescription": "設定可選覆寫，送出後系統會讀取 Sheet 最新資料並於下一步讓你選專案。",
         "formFields": {
           "values": [
-            {
-              "fieldLabel": "projectPick",
-              "fieldType": "dropdown",
-              "fieldOptions": {
-                "values": [
-                  {
-                    "option": "babydodofun"
-                  },
-                  {
-                    "option": "landing-page"
-                  },
-                  {
-                    "option": "legacy-intranet"
-                  }
-                ]
-              },
-              "requiredField": true
-            },
             {
               "fieldLabel": "scopesOverride",
               "placeholder": "留空用 Sheet；填了覆寫（逗號分隔或 ALL/REMOTE_ONLY/LOCAL_ONLY）",
@@ -44,7 +26,7 @@
         0,
         0
       ],
-      "notes": "單頁 Form：直接呈現 Sheet 的 project_name dropdown。options 寫死在這裡，新增 Sheet 列時需同步更新此節點的 fieldOptions.values。原因：n8n formTrigger 在 Form 渲染前無法先讀 Sheet；試過多頁 Form（Trigger→Sheet→Code→Form）但 n8n GUI 會合併欄位、動態 options 拿不到資料。"
+      "notes": "第一頁 Form：只收 scopesOverride（optional）。按下送出後，02 Sheet 會動態讀取最新 project 列表，然後在 02c 第二頁 Form 呈現下拉選單。原因：formTrigger 的下拉 options 在表單渲染前就要決定，不能吃 Sheet 資料；所以 Sheet 必須發生在兩個 Form 節點之間。注意：若 formFields 為空，n8n GUI 會把 01 與 02c 合併成一頁，所以保留 scopesOverride 這個有意義的欄位做占位。"
     },
     {
       "parameters": {
@@ -59,20 +41,10 @@
           "value": "Sheet1",
           "mode": "name"
         },
-        "filtersUI": {
-          "values": [
-            {
-              "lookupColumn": "project_name",
-              "lookupValue": "={{ $json.projectPick }}"
-            }
-          ]
-        },
-        "options": {
-          "returnFirstMatch": true
-        }
+        "options": {}
       },
       "id": "tp-02",
-      "name": "02 Sheet — Read Selected Row",
+      "name": "02 Sheet — Read All Rows",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
@@ -86,19 +58,77 @@
           "name": "Google Sheets account 2"
         }
       },
-      "notes": "只讀使用者選中的那一列（project_name 比對 Form 的 projectPick）。credential 參照（id + name）已寫死在此節點的 credentials 欄位，重匯 JSON 不會把綁定洗掉。若換 n8n 實例或 credential 被重建，查新 id 後更新這個欄位。"
+      "notes": "讀取 Sheet 全部列（每次執行都抓最新）。下游 02b Make Options 會把 project_name 組成下拉選單；02d Filter Row 會用使用者在 02c 選的 projectPick 從這裡的結果挑出對應那一列（不再重讀 Sheet）。credential id 寫死在此節點，重匯 JSON 不會洗掉綁定。"
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// 03 Resolve + Precheck — 02 已經讀到選中的那一列，這裡展開 scopes + 做 precheck\n// 下游節點只看 projectName / scopes / warnings；原始 Sheet row 藏在 _rawRow 只給 04 Prepare Write Args 用\n\nconst row = $json;\nconst scopesOverride = ($('01 Form Trigger (pick project)').first().json.scopesOverride || '').trim();\n\nif (!row.project_name) throw new Error('Sheet row 缺 project_name');\nif (!row.target_url)   throw new Error('Sheet row 缺 target_url');\n\n// Preset 展開\nconst ALL    = ['precheck','static','unit','api-test','db-test','links','ssl','trivy','lighthouse','e2e','nuclei','security','stress','monkey'];\nconst REMOTE = ['precheck','ssl','security','nuclei','stress','lighthouse','links','monkey'];\nconst LOCAL  = ['static','unit','trivy','db-test'];\nfunction parseScopes(raw) {\n  if (Array.isArray(raw)) return raw;\n  if (!raw) return [];\n  return String(raw).split(',').map(s => s.trim()).filter(Boolean);\n}\nfunction expandPresets(list) {\n  const out = new Set();\n  for (const s of list) {\n    if (s === 'ALL' || s === 'all') ALL.forEach(x => out.add(x));\n    else if (s === 'REMOTE_ONLY' || s === 'remote-only') REMOTE.forEach(x => out.add(x));\n    else if (s === 'LOCAL_ONLY' || s === 'local-only') LOCAL.forEach(x => out.add(x));\n    else out.add(s);\n  }\n  return [...out];\n}\nconst scopes = expandPresets(parseScopes(scopesOverride || row.scopes));\n\n// Precheck warnings\nconst warnings = [];\nconst scopeSet = new Set(scopes);\nif (!row.local_path) {\n  warnings.push('local_path 未設 → skip static/unit/trivy/db-test');\n  ['static','unit','trivy','db-test'].forEach(s => scopeSet.delete(s));\n}\nif (!row.target_url.startsWith('https://') && scopeSet.has('ssl')) {\n  warnings.push('target_url 非 https → skip ssl');\n  scopeSet.delete('ssl');\n}\nconst finalScopes = [...scopeSet];\n\nreturn [{ json: {\n  projectName: row.project_name,\n  scopes: finalScopes,\n  scopesCsv: finalScopes.join(','),\n  warnings,\n  _rawRow: row\n}}];"
+        "jsCode": "// 02b Make Options — 把 Sheet 全部列轉成 { options: [{option: name}, ...], _allRows: [...] }\n// options 餵給 02c Form 的 dropdown；_allRows 保留給 02d Filter Row 用\nconst rows = items.map(it => it.json);\nconst enabledRows = rows.filter(r => {\n  const v = String(r.enabled ?? '').toLowerCase();\n  return v !== 'false' && v !== '0' && v !== 'no';\n});\nif (!enabledRows.length) throw new Error('Sheet 沒有 enabled=true 的列');\nconst options = enabledRows\n  .map(r => r.project_name)\n  .filter(Boolean)\n  .map(name => ({ option: String(name) }));\nreturn [{ json: { options, _allRows: enabledRows } }];"
+      },
+      "id": "tp-02b",
+      "name": "02b Make Options",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        0
+      ],
+      "notes": "Sheet → dropdown options。enabled=false / 0 / no 的列會被過濾掉，不會出現在選單中。"
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "projectPick",
+              "fieldType": "text",
+              "placeholder": "從上方名單複製貼上",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "formTitle": "Testing Pipeline — Step 2/2",
+          "formDescription": "=可選專案（即時來自 Sheet）：\n\n{{ $json.options.map(o => '• ' + o.option).join('\\n') }}\n\n請複製貼上到下方欄位。"
+        }
+      },
+      "id": "tp-02c",
+      "name": "02c Form — Pick Project",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        750,
+        0
+      ],
+      "notes": "第二頁 Form：mid-workflow form node（operation=page）。formDescription 用 expression 把 02b 的專案清單列出（保證通過 n8n 驗證）；projectPick 是 text input，使用者複製名稱貼上。下游 02d 會驗證貼入的 name 是否存在於 _allRows。若 n8n 某版本的 fixedCollection 驗證允許 fieldOptions.values 用 expression，可改回 dropdown。"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// 02d Filter Row — 用 02c 選的 projectPick 從 02b 的 _allRows 挑出對應列\nconst pick = $json.projectPick;\nif (!pick) throw new Error('projectPick 缺失（02c Form 未送出？）');\nconst allRows = $('02b Make Options').first().json._allRows || [];\nconst hit = allRows.find(r => r.project_name === pick);\nif (!hit) throw new Error(`Sheet 找不到 project_name=${pick}（可能在 Form 渲染到送出之間有改動）`);\nreturn [{ json: hit }];"
+      },
+      "id": "tp-02d",
+      "name": "02d Filter Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        0
+      ],
+      "notes": "用 02c 送出的 projectPick 從 02b 保留的 _allRows 挑出對應那列，不再重讀 Sheet。下游 03 Resolve 的 `const row = $json` 吃的就是這裡的輸出。"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// 03 Resolve + Precheck — 02 已經讀到選中的那一列，這裡展開 scopes + 做 precheck\n// 下游節點只看 projectName / scopes / warnings；原始 Sheet row 藏在 _rawRow 只給 04 Prepare Write Args 用\n\nconst row = $json;\nconst scopesOverride = ($('01 Form Trigger (pick project)').first().json.scopesOverride || '').trim();\n\nif (!row.project_name) throw new Error('Sheet row 缺 project_name');\nif (!row.target_url)   throw new Error('Sheet row 缺 target_url');\n\n// Preset 展開\nconst ALL    = ['precheck','static','api-test','links','ssl','trivy','lighthouse','e2e','nuclei','security','stress','monkey'];\nconst REMOTE = ['precheck','ssl','security','nuclei','stress','lighthouse','links','monkey'];\nconst LOCAL  = ['static','trivy'];\nfunction parseScopes(raw) {\n  if (Array.isArray(raw)) return raw;\n  if (!raw) return [];\n  return String(raw).split(',').map(s => s.trim()).filter(Boolean);\n}\nfunction expandPresets(list) {\n  const out = new Set();\n  for (const s of list) {\n    if (s === 'ALL' || s === 'all') ALL.forEach(x => out.add(x));\n    else if (s === 'REMOTE_ONLY' || s === 'remote-only') REMOTE.forEach(x => out.add(x));\n    else if (s === 'LOCAL_ONLY' || s === 'local-only') LOCAL.forEach(x => out.add(x));\n    else out.add(s);\n  }\n  return [...out];\n}\nconst scopes = expandPresets(parseScopes(scopesOverride || row.scopes));\n\n// Precheck warnings\nconst warnings = [];\nconst scopeSet = new Set(scopes);\nif (!row.local_path) {\n  warnings.push('local_path 未設 → skip static/trivy');\n  ['static','trivy'].forEach(s => scopeSet.delete(s));\n}\nif (!row.target_url.startsWith('https://') && scopeSet.has('ssl')) {\n  warnings.push('target_url 非 https → skip ssl');\n  scopeSet.delete('ssl');\n}\nconst finalScopes = [...scopeSet];\n\nreturn [{ json: {\n  projectName: row.project_name,\n  scopes: finalScopes,\n  scopesCsv: finalScopes.join(','),\n  warnings,\n  _rawRow: row\n}}];"
       },
       "id": "tp-03",
       "name": "03 Resolve + Precheck",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        500,
+        1250,
         0
       ],
       "notes": "展開 scopes preset + 做 precheck。02 已經透過 filter 只回傳選中那列，不用在這裡比對。"
@@ -113,7 +143,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        750,
+        1500,
         0
       ],
       "notes": "從 _rawRow 組 write-project-config.sh 需要的 5 個參數；砍掉其他 Sheet 欄位。"
@@ -127,7 +157,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1000,
+        1750,
         0
       ],
       "onError": "stopWorkflow"
@@ -142,7 +172,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1250,
+        2000,
         0
       ]
     },
@@ -155,7 +185,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1500,
+        2250,
         0
       ],
       "onError": "stopWorkflow"
@@ -172,7 +202,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        1750,
+        2500,
         0
       ],
       "onError": "continueRegularOutput"
@@ -189,24 +219,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        2000,
-        0
-      ],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('unit') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' unit' : 'echo [SKIP] unit not in scopes' }}",
-        "options": {
-          "executionTimeout": 600000
-        }
-      },
-      "id": "tp-10",
-      "name": "10 Unit (PHPUnit)",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        2250,
+        2750,
         0
       ],
       "onError": "continueRegularOutput"
@@ -223,28 +236,11 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        2500,
+        3250,
         0
       ],
       "onError": "continueRegularOutput",
       "notes": "多身分迴圈（ADMIN + USER1~5）在 run-project.sh 內處理，產生 newman-junit-<id>.xml。"
-    },
-    {
-      "parameters": {
-        "command": "={{ $('06 Extract Path').first().json.scopesCsv.split(',').includes('db-test') ? 'bash scripts/run-project.sh ' + $('06 Extract Path').first().json.projectName + ' db-test' : 'echo [SKIP] db-test not in scopes' }}",
-        "options": {
-          "executionTimeout": 300000
-        }
-      },
-      "id": "tp-12",
-      "name": "12 DB-Test (MySQL fixtures)",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [
-        2750,
-        0
-      ],
-      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -258,7 +254,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        3000,
+        3750,
         0
       ],
       "onError": "continueRegularOutput"
@@ -275,7 +271,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        3250,
+        4000,
         0
       ],
       "onError": "continueRegularOutput"
@@ -292,7 +288,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        3500,
+        4250,
         0
       ],
       "onError": "continueRegularOutput"
@@ -309,7 +305,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        3750,
+        4500,
         0
       ],
       "onError": "continueRegularOutput"
@@ -326,7 +322,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        4000,
+        4750,
         0
       ],
       "onError": "continueRegularOutput"
@@ -343,7 +339,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        4250,
+        5000,
         0
       ],
       "onError": "continueRegularOutput"
@@ -360,7 +356,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        4500,
+        5250,
         0
       ],
       "onError": "continueRegularOutput"
@@ -377,7 +373,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        4750,
+        5500,
         0
       ],
       "onError": "continueRegularOutput"
@@ -394,7 +390,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        5000,
+        5750,
         0
       ],
       "onError": "continueRegularOutput"
@@ -411,7 +407,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        5250,
+        6000,
         0
       ],
       "onError": "continueRegularOutput"
@@ -428,7 +424,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        5500,
+        6250,
         0
       ],
       "onError": "continueRegularOutput"
@@ -442,7 +438,7 @@
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        5750,
+        6500,
         0
       ],
       "onError": "continueRegularOutput",
@@ -451,14 +447,14 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// 27 Parse Results — 最後端點\nconst pname = $('06 Extract Path').first().json.projectName;\nconst warnings = $('06 Extract Path').first().json.warnings || [];\nlet parsed = {};\ntry {\n  parsed = JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    projectName: pname,\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    warnings\n  };\n}\nconst merged = [...new Set([...(parsed.warnings || []), ...warnings])];\nreturn {\n  projectName: pname,\n  overallScore: parsed.lighthouse?.avg?.performance ?? null,\n  reportDir: parsed.reports_dir,\n  reportMd: parsed.report_md,\n  warnings: merged,\n  // 展開摘要欄位，Schema 面板直接看\n  ssl: parsed.ssl,\n  static: parsed.static,\n  security: parsed.security,\n  stress: parsed.stress,\n  unit: parsed.unit,\n  e2e: parsed.e2e,\n  nuclei: parsed.nuclei,\n  lighthouse: parsed.lighthouse?.avg,\n  monkey: parsed.monkey,\n  trivy: parsed.trivy ? { total: parsed.trivy.total, critical: parsed.trivy.critical, high: parsed.trivy.high } : null,\n  links: parsed.links ? { total: parsed.links.total, errors: parsed.links.errors } : null\n};"
+        "jsCode": "// 27 Parse Results — 最後端點\nconst pname = $('06 Extract Path').first().json.projectName;\nconst warnings = $('06 Extract Path').first().json.warnings || [];\nlet parsed = {};\ntry {\n  parsed = JSON.parse($json.stdout);\n} catch (e) {\n  return {\n    projectName: pname,\n    parseError: e.message,\n    rawStdout: ($json.stdout || '').slice(0, 500),\n    warnings\n  };\n}\nconst merged = [...new Set([...(parsed.warnings || []), ...warnings])];\nreturn {\n  projectName: pname,\n  overallScore: parsed.lighthouse?.avg?.performance ?? null,\n  reportDir: parsed.reports_dir,\n  reportMd: parsed.report_md,\n  warnings: merged,\n  // 展開摘要欄位，Schema 面板直接看\n  ssl: parsed.ssl,\n  static: parsed.static,\n  security: parsed.security,\n  stress: parsed.stress,\n  e2e: parsed.e2e,\n  nuclei: parsed.nuclei,\n  lighthouse: parsed.lighthouse?.avg,\n  monkey: parsed.monkey,\n  trivy: parsed.trivy ? { total: parsed.trivy.total, critical: parsed.trivy.critical, high: parsed.trivy.high } : null,\n  links: parsed.links ? { total: parsed.links.total, errors: parsed.links.errors } : null\n};"
       },
       "id": "tp-25",
       "name": "25 Parse Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        6000,
+        6750,
         0
       ]
     }
@@ -468,14 +464,47 @@
       "main": [
         [
           {
-            "node": "02 Sheet — Read Selected Row",
+            "node": "02 Sheet — Read All Rows",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "02 Sheet — Read Selected Row": {
+    "02 Sheet — Read All Rows": {
+      "main": [
+        [
+          {
+            "node": "02b Make Options",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02b Make Options": {
+      "main": [
+        [
+          {
+            "node": "02c Form — Pick Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02c Form — Pick Project": {
+      "main": [
+        [
+          {
+            "node": "02d Filter Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02d Filter Row": {
       "main": [
         [
           {
@@ -556,17 +585,6 @@
       "main": [
         [
           {
-            "node": "10 Unit (PHPUnit)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "10 Unit (PHPUnit)": {
-      "main": [
-        [
-          {
             "node": "11 API-Test (Newman multi-identity)",
             "type": "main",
             "index": 0
@@ -575,17 +593,6 @@
       ]
     },
     "11 API-Test (Newman multi-identity)": {
-      "main": [
-        [
-          {
-            "node": "12 DB-Test (MySQL fixtures)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "12 DB-Test (MySQL fixtures)": {
       "main": [
         [
           {

@@ -11,8 +11,8 @@ schema_version: 2
 project:
   name: example_project                  # ① 專案識別名稱（英數底線，用於 reports/<name>/）
   target_url: https://example.com        # ② 線上測試目標 URL（SSL/ZAP/k6/E2E 用）
-  local_path: /absolute/path/to/project  # ③ 本地原始碼路徑（留空或設為 ""  → 只跑網路測試，不跑 static/unit/e2e）
-  php_version: "8.1"                     # ④ PHP 版本（決定 PHPUnit Docker image；非 PHP 專案留此預設即可）
+  local_path: /absolute/path/to/project  # ③ 本地原始碼路徑（留空或設為 ""  → 只跑網路測試，不跑 static/trivy）
+  php_version: "8.1"                     # ④ PHP 版本（保留欄位以利未來工具切版；非 PHP 專案留此預設即可）
 
 # ─── 以下皆選填；沒寫就用智慧預設 ─────────────────────────────
 #
@@ -21,9 +21,8 @@ project:
 #   - tests.static.enabled     : 有 local_path 且掃描到 .php 檔 → 自動開（level 5）
 #   - tests.security.enabled   : 一律開
 #   - tests.stress.enabled     : 一律開（vus=10, duration=30s, pages=[/]）
-#   - tests.unit.enabled       : .testing/unit/phpunit.xml 存在 → 自動開
 #   - tests.e2e.enabled        : .testing/e2e/package.json 存在 → 自動開
-#   - tests.unit.use_db        : .testing/unit/fixtures/*.sql 存在 → 自動起測試用 MySQL 容器
+#   - tests.api-test.enabled   : .testing/api/collections/*.postman_collection.json 存在 → 自動開
 #   - tests.nuclei.enabled     : 一律開（severity=critical,high,medium, rate_limit=50）
 #   - tests.lighthouse.enabled : 一律開（preset=desktop, pages=[/]）
 #   - tests.monkey.enabled     : 一律開（pages=[/], attacks=500, delay_ms=10）
@@ -42,9 +41,6 @@ project:
 #     vus: 20                            # 預設 10（共享主機建議 ≤ 10）
 #     duration: 60s                      # 預設 30s
 #     pages: [/, /login.html, /api/health.php]
-#
-#   unit:
-#     enabled: false                     # 若自動偵測到但不想跑，強制關掉
 #
 #   e2e:
 #     auth:

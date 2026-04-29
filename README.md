@@ -2,7 +2,10 @@
 
 > **角色**：「測試總管理者」。
 > 負責對任何遵守 [專案測試規範](./docs/project-convention.md) 的 PHP 網站專案，
-> 執行自動化測試（SSL / 資安 / 壓力 / 靜態分析 / 單元 / E2E）。
+> 執行自動化測試（SSL / 資安 / 壓力 / 靜態分析 / E2E / API）。
+>
+> **單元測試不歸這邊管**：每個專案的單元測試由其自己的測試資料夾自行維護。
+> 本 pipeline 專注於黑箱／行為測試（API、壓力、安全、E2E、視覺迴歸等）。
 
 ---
 
@@ -20,7 +23,7 @@
 | **連結檢查** | **Lychee** | **通用** | **壞連結 / 圖片 404** |
 | 靜態分析 | PHPStan | 通用 | PHP 程式碼品質與型別檢查 |
 | **供應鏈** | **Trivy** | **通用** | **依賴 CVE / 洩漏 secret / 錯誤配置** |
-| **單元測試** | **PHPUnit** | **客製** | **各專案在 `.testing/unit/` 自行撰寫** |
+| **API 測試** | **Newman (Postman)** | **客製** | **各專案在 `.testing/api/collections/` 放 Postman collection** |
 | **UI / E2E 測試** | **Playwright** | **客製** | **各專案在 `.testing/e2e/` 自行撰寫** |
 | **互動探測** | **Gremlins.js** | **通用** | **Monkey 測試：隨機亂點亂打，抓未處理 JS 錯誤** |
 
@@ -48,9 +51,9 @@
 │               │                                          │
 │   ┌───────────┬──────────┬──────────┬─────────────┐   │
 │   ▼           ▼          ▼          ▼             ▼   │
-│ testssl   ZAP/Nuclei   k6      PHPStan/Trivy  PHPUnit │
-│ Lighthouse  Lychee   Monkey                           │
-│  (遠端)    (遠端)    (遠端)    (本地原始碼) (本地原始碼) │
+│ testssl   ZAP/Nuclei   k6      PHPStan/Trivy  Newman  │
+│ Lighthouse  Lychee   Monkey  Playwright(E2E)          │
+│  (遠端)    (遠端)    (遠端)    (本地原始碼)    (遠端)  │
 │                                                          │
 └──────────────────────────────────────────────────────────┘
                     │
@@ -60,8 +63,8 @@
 ```
 
 **兩種測試資料流**：
-- **遠端流**（SSL / ZAP / Nuclei / k6 / Lighthouse / Lychee / E2E / Monkey）：從 Docker 發 HTTPS 請求打目標站
-- **本地流**（PHPStan / PHPUnit / Trivy）：掛載專案原始碼到 Docker 內做分析
+- **遠端流**（SSL / ZAP / Nuclei / k6 / Lighthouse / Lychee / E2E / Monkey / Newman API）：從 Docker 發 HTTPS 請求打目標站
+- **本地流**（PHPStan / Trivy）：掛載專案原始碼到 Docker 內做分析
 
 ---
 
@@ -81,7 +84,7 @@ automated-testing-pipeline/
 │   ├── testing.yml                #   4 個必填欄位範本
 │   ├── link.sh                    #   一鍵連結 + 跑完整流程
 │   ├── .env.example               #   可選：專案敏感值範本
-│   └── {unit,e2e,static,ssl,security,stress,lighthouse,nuclei,hooks,scripts}/
+│   └── {e2e,api,static,ssl,security,stress,lighthouse,nuclei,hooks,scripts}/
 │                                  #   10 個可選客製資料夾（預設空 .gitkeep）
 │
 ├── scripts/
@@ -107,7 +110,10 @@ automated-testing-pipeline/
 │   ├── links/                     # ★ Lychee 由 compose 直接驅動
 │   ├── static/phpstan.neon.dist   # ★ 通用 PHPStan 設定
 │   ├── trivy/                     # ★ Trivy 由 run-project.sh 直接 docker run
-│   ├── unit/phpunit.xml.dist      # ★ PHPUnit 範本（給專案複製）
+│   ├── api/                       # ★ Newman / Postman API 測試骨架
+│   │   ├── Dockerfile
+│   │   ├── collections/
+│   │   └── postman/run-newman.sh
 │   ├── e2e/                       # ★ Playwright 通用骨架
 │   │   ├── package.json
 │   │   ├── playwright.config.ts
@@ -163,7 +169,7 @@ bash scripts/run-project.sh <name>            # 全部測試
 bash scripts/run-project.sh <name> security   # 單一測試類型
 ```
 
-完整 scope 列表：`all | ssl | security | stress | static | unit | e2e | nuclei | lighthouse | monkey | trivy | links | summary`
+完整 scope 列表：`all | ssl | security | stress | static | e2e | api-test | auth-test | visual-test | browser-compat | nuclei | lighthouse | monkey | trivy | links | summary`
 
 報告輸出：`reports/<project-name>/report.md`
 

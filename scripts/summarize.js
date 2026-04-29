@@ -174,7 +174,7 @@ function parseK6() {
   } catch (e) { return { status: 'parse-error', error: e.message }; }
 }
 
-// 數 testcase 元素（比解析 testsuite 聚合屬性更穩，因為 PHPUnit/Playwright
+// 數 testcase 元素（比解析 testsuite 聚合屬性更穩，因為 Newman/Playwright
 // JUnit XML 的 testsuite 可能多層巢狀，聚合值放的位置不固定）
 function countJUnit(xml) {
   // 只算葉子 testcase（不含 nested）
@@ -199,24 +199,6 @@ function extractFails(xml, withClassname = true) {
     }
   }
   return fails;
-}
-
-// ─── ⑤ PHPUnit ───────────────────────────────────────────
-function parsePHPUnit() {
-  const p = findRaw('phpunit.xml');
-  if (!p) return { status: 'no-report' };
-  try {
-    const xml = read(p);
-    const { tests, failures, errors } = countJUnit(xml);
-    if (tests === 0) return { status: 'parse-error', error: 'no testcases found' };
-    let coverage = null;
-    const cov = findRaw('phpunit-coverage.txt');
-    if (cov) {
-      const m2 = read(cov).match(/Lines:\s+(\d+\.\d+)%/);
-      if (m2) coverage = parseFloat(m2[1]);
-    }
-    return { tests, failures, errors, coverage, fails: extractFails(xml, true) };
-  } catch (e) { return { status: 'parse-error', error: e.message }; }
 }
 
 // ─── ⑥ Playwright ────────────────────────────────────────
@@ -396,7 +378,6 @@ const s  = parseSSL();
 const ps = parsePHPStan();
 const z  = parseZAP();
 const k  = parseK6();
-const u  = parsePHPUnit();
 const pw = parsePlaywright();
 const nu = parseNuclei();
 const lh = parseLighthouse();
@@ -465,17 +446,6 @@ if (k.status === 'no-report') {
 } else {
   const p95 = Math.round(k.p95Ms);
   L.push(`④ 壓力測試        p95=${p95}ms  fail=${k.failedPct.toFixed(2)}%  reqs=${k.totalReqs}${trend(p95, prev?.k6?.p95)}`);
-}
-
-// ⑤
-if (u.status === 'no-report') {
-  L.push('⑤ 單元測試        (未啟用)');
-} else if (u.status === 'parse-error') {
-  L.push(`⑤ 單元測試        解析失敗：${u.error}`);
-} else {
-  const pass = u.tests - u.failures - u.errors;
-  const cov = u.coverage != null ? `, cov=${u.coverage.toFixed(1)}%` : '';
-  L.push(`⑤ 單元測試        ${pass}/${u.tests} pass${cov}${trend(u.failures + u.errors, prev?.unit ? prev.unit.failures + prev.unit.errors : null)}`);
 }
 
 // ⑥
@@ -602,25 +572,6 @@ if (!k.status) {
   L.push(`- 總請求：${k.totalReqs}`);
   L.push(`- avg：${Math.round(k.avgMs)}ms  |  p95：${Math.round(k.p95Ms)}ms`);
   L.push(`- 失敗率：${k.failedPct.toFixed(2)}%`);
-  L.push('');
-}
-
-// ⑤ PHPUnit failures
-if (!u.status) {
-  L.push('### ⑤ 單元測試 PHPUnit');
-  L.push('');
-  L.push(`- ${u.tests} tests, ${u.tests - u.failures - u.errors} pass, ${u.failures} fail, ${u.errors} error`);
-  if (u.coverage != null) L.push(`- 覆蓋率：${u.coverage.toFixed(1)}%`);
-  if (u.fails.length) {
-    L.push('');
-    L.push('**失敗：**');
-    L.push('');
-    for (const f of u.fails) {
-      L.push(`- \`${f.class}::${f.test}\` — ${f.message}`);
-    }
-  }
-  L.push('');
-  L.push(`覆蓋率詳細：[\`raw/coverage/index.html\`](raw/coverage/index.html)`);
   L.push('');
 }
 
@@ -758,9 +709,6 @@ const entry = {
     fail: +k.failedPct.toFixed(2),
     reqs: k.totalReqs,
   },
-  unit: u.status ? null : {
-    tests: u.tests, failures: u.failures, errors: u.errors, coverage: u.coverage,
-  },
   e2e: pw.status ? null : { tests: pw.tests, failures: pw.failures },
   nuclei: nu.status ? null : {
     total: nu.total, critical: nu.critical, high: nu.high, medium: nu.medium, low: nu.low,
@@ -803,7 +751,6 @@ L.push('| `raw/testssl-*.html/.json` | SSL 詳細 |');
 L.push('| `raw/phpstan.json` | PHPStan 原始 JSON |');
 L.push('| `raw/zap-report.html/.json` | ZAP 完整報告 |');
 L.push('| `raw/k6-summary.json` | k6 metrics |');
-L.push('| `raw/phpunit.xml` `raw/coverage/` | PHPUnit JUnit + 覆蓋率 HTML |');
 L.push('| `raw/playwright/index.html` | Playwright HTML 報告 |');
 L.push('| `raw/nuclei.jsonl` | Nuclei findings（JSONL）|');
 L.push('| `raw/lighthouse-manifest.json` `raw/lighthouse-*.report.html` | Lighthouse 摘要 + 每頁 HTML |');
@@ -835,9 +782,6 @@ const structured = {
     avg_ms: Math.round(k.avgMs),
     failed_pct: +k.failedPct.toFixed(2),
     total_reqs: k.totalReqs,
-  },
-  unit: u.status ? { status: u.status } : {
-    tests: u.tests, failures: u.failures, errors: u.errors, coverage: u.coverage, fails: u.fails,
   },
   e2e: pw.status ? { status: pw.status } : {
     tests: pw.tests, failures: pw.failures, fails: pw.fails,

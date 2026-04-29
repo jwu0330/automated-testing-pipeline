@@ -59,13 +59,13 @@ project:
 
 ### 2.1 專案客製測試（各資料夾）
 
-> **需要專案測試碼**（unit / e2e / api）：資料夾放了檔案才會跑
+> **需要專案測試碼**（e2e / api）：資料夾放了檔案才會跑
 > **通用測試的覆寫**（ssl / security / stress / static / ...）：一律會跑；資料夾只是額外客製
+>
+> **單元測試不在這裡**：請於專案自己的測試資料夾撰寫並執行；本 pipeline 不接管。
 
 | 資料夾 | 觸發條件 | 放什麼 |
 |--------|---------|--------|
-| `unit/` | 有 `unit/phpunit.xml` → 才會跑 | `phpunit.xml` + `bootstrap.php` + `tests/*Test.php` |
-| `unit/fixtures/` | 有任一 `*.sql` → 自動啟 test-mysql | 初始資料 SQL |
 | `e2e/` | 有 `e2e/package.json` → 才會跑 | `package.json` + `playwright.config.ts` + `tests/*.spec.ts` |
 | `api/collections/` | 有 `*.postman_collection.json` → 才會跑 | Postman collection JSON |
 | `static/phpstan.neon` | 存在 → 覆寫預設 | 客製 PHPStan 設定 |
@@ -110,15 +110,11 @@ newman-junit-user2-phone_signup.xml
 - 管理端跟使用者端的 UI 常常是兩套
 - 即使只是細微差異，都要獨立驗過才能確定沒漏
 
-### 2.3 DB 整合測試
-
-`unit/` 測試要連 DB：放一個 `.sql` 檔到 `.testing/unit/fixtures/` 就**自動**啟動 test-mysql 容器（用後即棄 tmpfs）。
-
-### 2.4 覆寫測試參數
+### 2.3 覆寫測試參數
 
 在 `testing.yml` 加 `tests:` 區塊（範例見 `testing.yml` 註解）。沒寫就走自動偵測。
 
-### 2.5 E2E 登入（舊欄位，向下相容）
+### 2.4 E2E 登入（舊欄位，向下相容）
 
 Playwright 舊 spec 用的 `E2E_USERNAME` / `E2E_PASSWORD` 放在 `.testing/.env`，通常沿用 `ADMIN_*` 的值即可。
 
@@ -142,8 +138,8 @@ bash .testing/link.sh run          # 只跑（之前已連結過）
 
 ```bash
 bash <pipeline>/scripts/run-project.sh <name> <scope>
-# scope 可用：ssl / security / stress / static / unit / e2e /
-#             api-test / auth-test / db-test / visual-test / browser-compat /
+# scope 可用：ssl / security / stress / static / e2e /
+#             api-test / auth-test / visual-test / browser-compat /
 #             nuclei / lighthouse / monkey / trivy / links
 ```
 
@@ -159,9 +155,7 @@ bash <pipeline>/scripts/run-project.sh <name> <scope>
 | security (ZAP) | 一律開 |
 | stress (k6) | 一律開（vus=10, duration=30s, pages=[/]） |
 | static (PHPStan) | `local_path` 有 `.php` 檔就開（level=5） |
-| unit (PHPUnit) | `.testing/unit/phpunit.xml` 存在才開 |
 | e2e (Playwright) | `.testing/e2e/package.json` 存在才開 |
-| unit + DB | `.testing/unit/fixtures/*.sql` 存在才啟 test-mysql |
 | api-test / auth-test | `.testing/api/collections/*.postman_collection.json` 存在才開 |
 | nuclei | 一律開（severity=critical,high,medium） |
 | lighthouse | 一律開（preset=desktop, pages=[/]） |
@@ -185,7 +179,6 @@ bash <pipeline>/scripts/run-project.sh <name> <scope>
     ├── newman-junit-user1-line_signup.xml      API/Auth 身分：user1
     ├── newman-junit-user2-phone_signup.xml     ...
     ├── newman-junit.xml                        最後一輪的副本（給 summarize.js）
-    ├── phpunit.xml / coverage/
     ├── playwright/ / playwright-junit.xml
     ├── testssl-*.{html,json}
     ├── zap-report.{html,json}
@@ -205,7 +198,7 @@ n8n GUI：http://localhost:5678（帳密在 pipeline 的 `.env`）
 ## 附錄 C：FAQ
 
 **Q：我只想 commit `testing.yml`，不想整包 commit？**
-不建議。其他人接手時 `link.sh` 就沒了。最多把 `.env` 和測試產物（`unit/test-results/`、`e2e/node_modules/`）排掉（已在 `.gitignore` 中）。
+不建議。其他人接手時 `link.sh` 就沒了。最多把 `.env` 和測試產物（`e2e/node_modules/` 等）排掉（已在 `.gitignore` 中）。
 
 **Q：兩個專案要共用同一份 pipeline，要各複製一份 `.testing/` 嗎？**
 對。每個專案的 `.testing/` 是它自己的客製區；共用的只有 pipeline 本身。每個專案 `name` 要不同，報告分別放 `reports/<name>/`。
@@ -234,7 +227,6 @@ chmod +x ~/.local/bin/yq
 - [ ] 整包複製 `.testing/` 到專案根
 - [ ] 編輯 `testing.yml` 的 4 個必填欄位
 - [ ] （可選）需要 API/Auth 測試 → `cp .env.example .env`，填 `ADMIN_*` 和需要的 `USER*_*`
-- [ ] （可選）需要 unit 測試 → 放 `unit/phpunit.xml` + `unit/tests/*.php`
 - [ ] （可選）需要 e2e → 放 `e2e/package.json` + `e2e/tests/*.spec.ts`
 - [ ] （可選）調整新工具參數 → 在 `testing.yml` 加 `tests.xxx.*` 區塊
 - [ ] 執行 `bash .testing/link.sh`

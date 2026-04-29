@@ -10,10 +10,11 @@
 2. [註冊第一個專案](#2-註冊第一個專案)
 3. [執行通用測試](#3-執行通用測試)
 4. [執行專案客製測試](#4-執行專案客製測試)
-   - 4.1 單元測試 (PHPUnit)
-   - 4.2 E2E 測試 (Playwright)
-   - 4.3 API / Auth 測試（Newman，多身分迴圈）
-   - 4.4 通用擴充測試（Nuclei / Lighthouse / Monkey / Trivy / Lychee）
+   - 4.1 E2E 測試 (Playwright)
+   - 4.2 API / Auth 測試（Newman，多身分迴圈）
+   - 4.3 通用擴充測試（Nuclei / Lighthouse / Monkey / Trivy / Lychee）
+
+> **單元測試已從 pipeline 移除**：請於專案自己的測試資料夾撰寫並執行；本 pipeline 不接管 PHPUnit / DB seed 驗證。
 5. [檢視報告](#5-檢視報告)
 6. [常見問題 (FAQ)](#6-常見問題-faq)
 7. [進階：透過 n8n GUI 排程](#7-進階透過-n8n-gui-排程)
@@ -79,11 +80,9 @@ bash scripts/register-project.sh your-project /path/to/your-project
 | `links` | Lychee | 壞連結 / 圖片 404 檢查 |
 | `static` | PHPStan | 靜態分析 |
 | `trivy` | Trivy fs | 供應鏈：依賴 CVE / 洩漏 secret / 錯誤配置 |
-| `unit` | PHPUnit | 單元測試（見 §4.1） |
-| `e2e` | Playwright | UI/API 端對端測試（見 §4.2） |
-| `api-test` | Newman (Postman CLI) | **A3 + B6**：API 端點驗證 + 多身分權限驗證（見 §4.3） |
+| `e2e` | Playwright | UI/API 端對端測試（見 §4.1） |
+| `api-test` | Newman (Postman CLI) | **A3 + B6**：API 端點驗證 + 多身分權限驗證（見 §4.2） |
 | `auth-test` | Newman | `api-test` 的 n8n alias，共用同一份 collection |
-| `db-test` | MySQL + bash | **A4**：DB schema / fixture 完整性（見 §4.4） |
 | `visual-test` | Playwright `--grep C2` | **C2**：視覺基準線比對（只跑 `visual.spec.ts` 中的 C2 describe） |
 | `browser-compat` | Playwright `--grep C3` | **C3**：瀏覽器相容（chromium/firefox/webkit，跑 `visual.spec.ts` 中的 C3 describe） |
 | `monkey` | Gremlins.js | Monkey 測試：隨機亂點亂打，抓未處理 JS 錯誤 |
@@ -111,7 +110,7 @@ bash scripts/run-project.sh babydodofun LOCAL_ONLY       # preset：只跑本地
 - **Preset**（大寫或底線式都可以）：
   - `ALL` / `all` — 全部（預設；同留空）
   - `REMOTE_ONLY` / `remote-only` — `precheck, ssl, security, nuclei, stress, lighthouse, links, monkey`
-  - `LOCAL_ONLY` / `local-only` — `static, unit, trivy, db-test`
+  - `LOCAL_ONLY` / `local-only` — `static, trivy`
 
 Preset 會在執行前展開成具體 scope 清單，所以你在 log 會看到 `解析 scopes：...` 一行顯示真正會跑的項目。
 
@@ -120,7 +119,7 @@ Preset 會在執行前展開成具體 scope 清單，所以你在 log 會看到 
 從 v0.5 起，`local_path` 不存在不再是致命錯誤：
 
 - `target_url` 空 → **致命**（沒東西可測，exit 1）
-- `local_path` 不存在 → **warning**，降級為 URL-only 模式，自動 skip `static / unit / trivy / db-test`
+- `local_path` 不存在 → **warning**，降級為 URL-only 模式，自動 skip `static / trivy`
 - `ADMIN_USERNAME/PASSWORD` 空 → warning，`api-test / auth-test` 會 skip
 - `E2E_USERNAME/PASSWORD` 空 → warning，`e2e` 降級為未登入流程
 - `target_url` 非 https → warning，`ssl` 會 skip
@@ -161,8 +160,8 @@ Sheet 規範與欄位見 [google-sheets-schema.md](./google-sheets-schema.md)。
   ↓
 07 Register + write warnings      (register-project.sh + 寫 n8n-precheck-warnings.txt)
   ↓
-08 ~ 23                           (16 個測試節點，每個獨立執行：precheck / static / unit /
-                                   api-test / db-test / links / ssl / trivy / lighthouse /
+08 ~ 23                           (測試節點，每個獨立執行：precheck / static /
+                                   api-test / links / ssl / trivy / lighthouse /
                                    e2e / visual / browser-compat / nuclei / security / stress / monkey)
   ↓
 24 Summary Scorecard              (summarize.js --json)
@@ -283,120 +282,9 @@ n8n 某些節點有**必填欄位**，漏填會在 GUI 顯示紅色三角警告�
 
 ## 4. 執行專案客製測試
 
-### 4.1 單元測試 (PHPUnit)
+> **單元測試已從 pipeline 移除**：請於專案自己的測試資料夾撰寫並執行。pipeline 不再提供 `unit` / `db-test` scope、不再啟動 `test-mysql` 容器。
 
-#### 4.1.1 專案需要的檔案
-
-```
-<project>/.testing/unit/
-├── phpunit.xml              # PHPUnit 設定（可從 tests/unit/phpunit.xml.dist 複製）
-├── bootstrap.php            # 載入待測程式碼 + 注入 stub
-├── stubs.php                # 函式 stub（視專案而定，可為空）
-└── tests/
-    └── *Test.php            # PHPUnit 測試類別
-```
-
-啟用條件（schema v2）：`phpunit.xml` 存在 → 自動啟用；無需在 `testing.yml` 設任何欄位。想強制停用：`testing.yml` 加 `tests.unit.enabled: false`。
-
-**若測試需要 DB**，在 `.testing/unit/fixtures/` 放任一個 `.sql` 檔即可自動觸發 DB 整合模式（見 §4.1.6）。
-
-#### 4.1.2 從範本建立
-
-```bash
-# 進入專案目錄
-cd /path/to/your-project
-
-# 複製範本
-mkdir -p .testing/unit/tests
-cp /mnt/e/Code/github/automated-testing-pipeline/tests/unit/phpunit.xml.dist \
-   .testing/unit/phpunit.xml
-cp /mnt/e/Code/github/automated-testing-pipeline/tests/unit/bootstrap.php.dist \
-   .testing/unit/bootstrap.php
-
-# 依專案原始碼路徑修改 phpunit.xml 內 <source><include> 區塊
-# 依專案 autoload 狀況修改 bootstrap.php
-```
-
-#### 4.1.3 執行
-
-```bash
-bash scripts/run-project.sh <project> unit
-```
-
-首次會自動建置 `testing-pipeline-phpunit:php<版本>` image（含 pcov 覆蓋率擴充），約 1–2 分鐘。
-
-#### 4.1.4 真實範例：babydodofun 的 6 個純函式
-
-babydodofun 的 `public/api/member_helpers.php` 裡有 6 個無 DB 耦合的純函式（validatePhone / validateDate / validateLength / calculateExpiry / validateMemberNo / isPhoneRegistered），加上 4 個資料轉換函式（getLevelLabel / getLevelPreset / buildBalanceFlex / buildDeductConfirmFlex）。
-
-實際設定：
-
-- `.testing/unit/phpunit.xml` → `<source><include><file>../../public/api/member_helpers.php</file></include></source>`
-- `.testing/unit/bootstrap.php` → `require_once __DIR__ . '/../../public/api/member_helpers.php';`
-- `.testing/unit/tests/MemberHelpersTest.php` → 10 個函式、約 30 個 test method、約 113 個 assertion
-
-執行結果：
-
-```
-OK (83 tests, 113 assertions)
-Lines:   29.41% (70/238)
-```
-
-剩下 70% 是 DB / LINE API / SMS API 依賴，不適合做純單元測試。DB 依賴的部分由 §4.1.6 的整合測試覆蓋。
-
-#### 4.1.6 DB 整合測試（test-mysql 容器）
-
-**觸發**：專案的 `.testing/unit/fixtures/` 存在任一 `.sql` 檔時自動啟用。pipeline 會：
-
-1. `docker compose --profile unit-db up -d test-mysql`（MySQL 8.0，tmpfs，用後即棄）
-2. 等 root 認證 ready（真實 `SELECT 1`，非只 `mysqladmin ping`）
-3. 載入 schema：`<project>/database/init.sql`
-4. 依檔名排序載入 `.testing/unit/fixtures/*.sql`
-5. `docker run` PHPUnit 時加入 `--network=atp-test-net`，注入 `TEST_DB_HOST=test-mysql` 等 5 個 env
-6. 測試完 → `docker compose --profile unit-db down -v`（容器與 tmpfs 一起消失）
-
-**在測試中連 DB**：兩條路
-
-```php
-// 路 A：用 pipeline 提供的 testDb()
-class MyIntegrationTest extends TestCase {
-    public function testX(): void {
-        $pdo = testDb();  // bootstrap.php.dist 範例 C 提供
-        $pdo->exec('INSERT INTO ...');
-    }
-}
-
-// 路 B：用專案自己的 db()，前提是 env.php 支援 APP_ENV=testing
-// bootstrap.php 把 TEST_DB_* 映射到專案習慣的 DB_* env var
-// 然後 db() 透過 env('DB_HOST') → getenv('DB_HOST') 就會拿到 test-mysql
-```
-
-**專案必須遵守的合約**（`env()` 必須在 `APP_ENV=testing` 時跳過 `config.local.php` 之類的本地設定檔），詳見 [project-convention.md §5.4](./project-convention.md#54-專案必須支援的合約重要)。
-
-**避免測試資料與 fixture 碰撞**：整合測試建的 test member `member_no` 用未來日期前綴；base class 的 `tearDownAfterClass` 依 class 前綴清掉。見 [project-convention.md §5.5](./project-convention.md#55-避免測試資料與-fixture-碰撞)。
-
-#### 4.1.7 真實範例：babydodofun 3 個 DB 整合測試類
-
-babydodofun 的 `.testing/unit/tests/` 下有 3 個 DB 整合測試類（extends `IntegrationTestCase`）：
-
-- **`MemberHelpersDbTest`**（13 tests）— `auditLog` / `autoDowngradeIfNeeded` / `reconcilePointBalance` / `generateMemberNo` 的 DB 行為
-- **`SchemaInvariantsTest`**（12 tests）— ENUM 值齊全、索引存在、欄位類型
-- **`DataIntegrityTest`**（8 tests）— 跨表不變式（無孤兒、point_balance 一致、deleted 必有 deleted_at）
-
-加上 2 個純 unit（MemberHelpersTest 83、LoggerTest 10），一次 `run-project.sh babydodofun unit` 會跑 **129 tests / 237 assertions / 覆蓋率 59.9%**（含 DB 行為，覆蓋率從純 unit 的 32% → 60%）。
-
-#### 4.1.8 報告位置
-
-| 檔案 | 內容 |
-|---|---|
-| `reports/<project>/raw/phpunit.xml` | JUnit XML（給 summarize.js 解析） |
-| `reports/<project>/raw/coverage/index.html` | 覆蓋率 HTML 報告（逐行點開） |
-| `reports/<project>/raw/phpunit-clover.xml` | Clover XML（給 Codecov 等工具） |
-| `reports/<project>/raw/phpunit-coverage.txt` | 純文字摘要 |
-
----
-
-### 4.2 E2E 測試 (Playwright)
+### 4.1 E2E 測試 (Playwright)
 
 #### 4.2.1 專案需要的檔案
 
@@ -672,7 +560,6 @@ bash scripts/run-project.sh <project>
 ② 靜態分析        22 個錯誤
 ③ 資安掃描        H=0 M=2 L=7 I=4
 ④ 壓力測試        p95=16ms  fail=0.00%  reqs=1450
-⑤ 單元測試        129/129 pass, cov=59.9%
 ⑥ E2E             18/18 pass
 ⑦ 深層資安        C=0 H=1 M=3 L=5
 ⑧ 前端品質        Perf=82 A11y=95 BP=93 SEO=100
@@ -695,9 +582,6 @@ reports/<project>/
     ├── phpstan.json / phpstan-errors.md
     ├── zap-report.html / .json
     ├── k6-summary.json
-    ├── phpunit.xml
-    ├── phpunit-coverage.txt
-    ├── coverage/index.html
     ├── playwright/index.html
     ├── playwright-junit.xml
     ├── nuclei.jsonl                       # ★ Nuclei 一行一 finding
@@ -713,7 +597,7 @@ reports/<project>/
 
 打開 http://localhost:5678，`Execute workflow`，最後一個節點 `Parse Scorecard — 結構化評分` 把 JSON 展開成欄位後，可在 n8n 的 Schema 面板直接檢視每項測試結果。
 
-流程：`Show Scorecard — 評分卡彙整` 呼叫 `summarize.js --json` 輸出 JSON → `Parse Scorecard` 節點 `JSON.parse` 成結構化物件 → Schema 面板逐欄顯示 ssl.grade / phpstan.total / phpunit.tests 等。
+流程：`Show Scorecard — 評分卡彙整` 呼叫 `summarize.js --json` 輸出 JSON → `Parse Scorecard` 節點 `JSON.parse` 成結構化物件 → Schema 面板逐欄顯示 ssl.grade / phpstan.total / e2e.tests 等。
 
 ---
 
@@ -729,14 +613,6 @@ rm -rf <project>/.testing/e2e/node_modules
 bash scripts/run-project.sh <project> e2e
 ```
 
-### Q: PHPUnit coverage 顯示 `Lines: 0.00% (0/...)`
-
-A: pcov 的 `pcov.directory` 沒指到專案。Pipeline 內已在 Dockerfile 寫死 `pcov.directory=/project`，如果還是 0%，確認 `phpunit.xml` 的 `<source><include>` 路徑正確（應為 `../../public/xxx`，以 `phpunit.xml` 位置為基準）。
-
-### Q: PHPUnit 遇到 `Cannot redeclare function X()`
-
-A: bootstrap.php 或 stubs.php 先宣告了一個該專案原始碼也會宣告的函式。把重複的拿掉；如果真的需要覆蓋行為，得用 runkit/uopz PHP 擴充（pipeline 預設沒裝）。
-
 ### Q: Playwright 報「Executable doesn't exist at ...」
 
 A: package.json 的 `@playwright/test` 版本和 pipeline 的 docker image 對不上。把版本號寫**精確值**（如 `"1.59.1"`），不要 caret。
@@ -744,32 +620,6 @@ A: package.json 的 `@playwright/test` 版本和 pipeline 的 docker image 對�
 ### Q: ZAP 回傳 exit code 2 算失敗嗎？
 
 A: 不算。ZAP 用 exit code 表達「有警告」；`run-project.sh` 已用 `|| echo ...` 吞掉，會繼續跑下一項。
-
-### Q: DB 整合測試 connection refused / No such file or directory
-
-A: 專案的 `env()` 沒有在 `APP_ENV=testing` 時跳過 `config.local.php`（或類似本地設定檔）。env() 會優先回傳 config 檔的 `DB_HOST=localhost`，覆蓋 pipeline 注入的 `DB_HOST=test-mysql`。請參照 [project-convention.md §5.4](./project-convention.md#54-專案必須支援的合約重要) 修 env 函式。
-
-### Q: DB 整合測試全部 PDOException: could not find driver
-
-A: PHPUnit 容器沒有 `pdo_mysql` 擴充。刪掉舊 image 重 build：
-
-```bash
-docker rmi testing-pipeline-phpunit:php8.1
-docker build --build-arg PHP_VERSION=8.1 -t testing-pipeline-phpunit:php8.1 tests/unit/
-```
-
-### Q: test-mysql 啟動後第一次跑遇 Access denied for user 'root'
-
-A: `mysqladmin ping` 在 TCP socket 開啟時就 pass，但 root 密碼初始化稍晚。pipeline 已改用 `mysql -uroot -ptest -e "SELECT 1"` 做真實認證等待；若還是遇到，檢查 `start_test_db()` 的 tries 上限是否過低（預設 45 秒應足夠）。
-
-### Q: 第二次跑 init.sql 遇 Duplicate entry 'admin001'
-
-A: test-mysql 容器第一次跑完沒銷毀就再跑一次，init.sql 重複載入。pipeline 正常流程會在 `run_unit()` 尾端呼叫 `stop_test_db`；若遇 CTRL-C 或其他中斷，手動清：
-
-```bash
-docker rm -f test-mysql
-docker network rm atp-test-net
-```
 
 ---
 
