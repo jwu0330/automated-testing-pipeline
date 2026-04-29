@@ -134,68 +134,85 @@ automated-testing-pipeline/
 
 ---
 
-## 快速開始（推薦：一鍵導入）
+## 快速開始
 
-共用 pipeline 只裝一次、啟動一次；每個專案複製 [`.testing/`](./.testing) kit 整包過去就能接上。
+主要介面是 **Claude Code Skills**（CLI），三個 skill 對應兩種情境。
 
-### 一次性：啟動共用 pipeline
+### 情境 A：自家專案的長期測試流水線（有原始碼）
 
-```bash
-cd /mnt/e/Code/github/automated-testing-pipeline
-cp .env.example .env                      # 編輯填入 N8N_PASSWORD
-docker compose --profile n8n up -d --build
+在你的專案目錄打開 Claude Code：
+
+```
+/pipeline-init    # 第一次接入：偵測 OpenAPI、建 .testing/、註冊專案
+/pipeline-run     # 之後每次跑：讀設定、選 scope、產報告
 ```
 
-### 每個新專案：三步驟一鍵跑
+報告寫進 `<project>/.testing/reports/report.md`。
 
-```bash
-# 1. 整包複製 kit 到專案（保留資料夾名 .testing/）
-cp -r /mnt/e/Code/github/automated-testing-pipeline/.testing /path/to/your-project/
+### 情境 B：一次性 review 別人的網站（沒原始碼）
 
-# 2. 編輯 4 個必填欄位
-vim /path/to/your-project/.testing/testing.yml
-
-# 3. 一鍵連結 + 跑完所有 n8n 流程
-bash /path/to/your-project/.testing/link.sh
+```
+/pipeline-quick-test
 ```
 
-完整說明：[`.testing/README.md`](./.testing/README.md)（必要 vs 可選、固定流程、FAQ 一份文件搞定）。
+Skill 會問你 URL、專案名、ADMIN 帳密，然後在 `<pipeline>/<name>/` 建臨時資料夾、跑全套、產報告。資料夾本地 gitignore（`.git/info/exclude`），review 完手動 `rm -rf <name>/`。
 
-### 進階：CLI 直接操作（不走 kit）
+### 安裝 skill（只需一次）
 
 ```bash
-bash scripts/register-project.sh <name> <path>
+mkdir -p ~/.claude/skills/{pipeline-init,pipeline-run,pipeline-quick-test}
+for s in pipeline-init pipeline-run pipeline-quick-test; do
+  curl -L "https://github.com/jwu0330/automated-testing-pipeline/releases/latest/download/${s}_SKILL.md" \
+    -o "~/.claude/skills/${s}/SKILL.md"
+done
+```
+
+完整安裝說明：[`skills/README.md`](./skills/README.md)。
+
+### CLI 直接操作（給沒裝 Claude Code 的人）
+
+```bash
+bash scripts/register-project.sh <name> <absolute-path>
 bash scripts/run-project.sh <name>            # 全部測試
-bash scripts/run-project.sh <name> security   # 單一測試類型
+bash scripts/run-project.sh <name> ssl,e2e    # 多選
 ```
 
-完整 scope 列表：`all | ssl | security | stress | static | e2e | api-test | auth-test | visual-test | browser-compat | nuclei | lighthouse | monkey | trivy | links | summary`
-
-報告輸出：`reports/<project-name>/report.md`
+完整 scope：`all | ssl | security | stress | static | e2e | api-test | nuclei | lighthouse | monkey | trivy | links | summary`
 
 ---
 
 ## 文件
 
-- **[`docs/QUICKSTART.md`](./docs/QUICKSTART.md)** ★ **從這裡開始**：15 分鐘上手；含 v0.5 release notes
-- **[`skills/README.md`](./skills/README.md)** ★ Claude Code Skills（獨立發行）：
-  - `/pipeline-init` — 偵測 OpenAPI、建立 `.testing/`、註冊專案（不跑測試）
-  - `/pipeline-run` — 讀設定、執行 pipeline、摘要報告（不改設定）
-- **[`.testing/README.md`](./.testing/README.md)** ★ 新專案導入（必要 vs 可選、固定流程、一鍵指令）
-- [docs/project-convention.md](./docs/project-convention.md) — 專案測試規範（深入參考）
-- [docs/run-tests.md](./docs/run-tests.md) — 操作手冊 + n8n 工作流
-- [docs/architecture-parallel-reporting.md](./docs/architecture-parallel-reporting.md) ★ **新** — 三路並行設計、報告安全驗證、工具評選細節
+- **[`skills/README.md`](./skills/README.md)** ★ **從這裡開始** — 三個 skill 的使用方式
+- [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) — 15 分鐘上手 CLI 流程
+- [`.testing/README.md`](./.testing/README.md) — `.testing/` kit 結構與必要 / 可選欄位
+- [docs/project-convention.md](./docs/project-convention.md) — 專案測試規範
+- [docs/run-tests.md](./docs/run-tests.md) — 操作手冊
+- [docs/architecture-parallel-reporting.md](./docs/architecture-parallel-reporting.md) — 三路並行設計、報告安全驗證
 - [docs/setup.md](./docs/setup.md) — WSL/Docker 安裝
+- [n8n/workflows/README.md](./n8n/workflows/README.md) — **[已棄用]** n8n GUI 流程，僅作參考保留
 
 ---
 
 ## 操作注意事項
 
-- **觸發方式只做手動**：n8n workflow 使用 Form Trigger，按 Execute workflow 時輸入 `projectName` 才會跑；**不做自動排程**，避免無人值守時對線上站做破壞性測試（ZAP/k6/Nuclei）。
-- **報告輪替**：`scripts/run-project.sh` 每次開跑前會呼叫 `scripts/rotate-reports.sh`，把超過 `REPORTS_KEEP_DAYS`（預設 30）天的報告打包進 `reports/<name>/archive/YYYY-MM.tar.gz`，archive 超過 365 天會自動刪。要關閉：`REPORTS_NO_ROTATE=1`。
-- **失敗通知**：Form Trigger 可填 `notifyEmail`；`overallScore < 80` 或 summary JSON 解析失敗時會寄信。SMTP credential 請在 n8n GUI 綁定，寄件者走 `SMTP_FROM` env。
-- **中文路徑風險**：`projects.registry.yml` 裡若路徑含中文（例 `/mnt/e/cwe網站/...`），在 docker volume mount 跨 WSL ↔ Windows 偶爾會出問題。建議客戶專案放在純英數路徑，或在 WSL 內 `mklink` 別名。
-- **docker.sock 掛載是 root-on-host**：n8n 容器掛了 `/var/run/docker.sock` + 整個 `/mnt/e`。**只適合單機開發環境**；若要上雲或多租戶，改用 sysbox / rootless docker 或乾脆把 executeCommand 拆到 sidecar。
+- **報告位置**：v0.6 起報告寫進 `<project>/.testing/reports/`（pipeline repo 不再儲存其他專案的測試結果）。Quick-test 模式寫進 `<pipeline>/<name>/.testing/reports/`，folder 本地 gitignore。
+- **報告輪替**：`run-project.sh` 每次開跑前呼叫 `rotate-reports.sh`，把超過 `REPORTS_KEEP_DAYS`（預設 30）天的報告打包進 `archive/YYYY-MM.tar.gz`，archive 超過 365 天自動刪。關閉：`REPORTS_NO_ROTATE=1`。
+- **中文路徑風險**：`projects.registry.yml` 裡若路徑含中文（例 `/mnt/e/cwe網站/...`），在 docker volume mount 跨 WSL ↔ Windows 偶爾出問題。建議客戶專案放純英數路徑，或在 WSL 內 `mklink` 別名。
+- **n8n 已棄用**：保留 `n8n/` 目錄與 docker-compose service 作為參考，但不再主推。CLI / Claude Code Skills 是現在的主要介面。
+
+---
+
+## 版本紀錄
+
+| 版本 | 日期 | 說明 |
+|------|------|------|
+| v0.1 | 2026-04-21 | 初始專案建立 |
+| v0.2 | 2026-04-21 | 補齊骨架：n8n、PHPStan、PHPUnit、Playwright、專案註冊機制、規範文件 |
+| v0.3 | 2026-04-21 | 補齊五工具：Nuclei（深層資安）/ Lighthouse（前端品質）/ Gremlins monkey / Trivy（供應鏈）/ Lychee（壞連結） |
+| v0.4 | 2026-04-22 | 通用化：Form Trigger 取代寫死 projectName、失敗 Email 通知、Precheck 失敗即中止、reports 自動輪替、移除 xcity.babydodofun fallback |
+| v0.5 | 2026-04-29 | 黑箱／行為測試專屬（移除 PHPUnit）、OpenAPI 自動轉 Postman collection |
+| v0.6 | 2026-04-29 | 報告寫進專案 `.testing/reports/`、API parser、Monkey self-host、Quick-test skill、n8n 軟下架 |
 
 ---
 

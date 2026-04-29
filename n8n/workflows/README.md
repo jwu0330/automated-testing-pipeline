@@ -1,5 +1,7 @@
 # n8n Workflows
 
+> **[已棄用]** v0.6 起主要介面改為 Claude Code Skills（`/pipeline-init`、`/pipeline-run`、`/pipeline-quick-test`）。本目錄保留供日後參考，不再主動維護；workflow 內的 scope 列表 / 報告路徑可能與最新 pipeline 不一致。
+
 本目錄存放可匯入 n8n 的 workflow 範本（JSON 匯出格式）。
 
 ## 檔案

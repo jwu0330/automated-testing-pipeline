@@ -170,7 +170,12 @@ services:
       - all
 
   # ─────────────────────────────────────
-  # 工作流程編排 (n8n) — 測試總管理者
+  # [DEPRECATED] 工作流程編排 (n8n) — 已棄用，僅作參考保留
+  #
+  # v0.6 起主要介面改為 Claude Code Skills (/pipeline-init, /pipeline-run,
+  # /pipeline-quick-test)。本 service 不再主推、不再隨主流程更新，
+  # 但 service 定義、workflow JSON、Dockerfile 都保留供日後參考。
+  #
   # 啟動：docker compose --profile n8n up -d
   # 訪問：http://localhost:${N8N_PORT:-5678}
   # ─────────────────────────────────────
