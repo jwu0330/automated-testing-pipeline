@@ -1,11 +1,13 @@
 import { test, expect } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Gremlins.js monkey test
  *
  * 對每個頁面：
  *   1. 訪問頁面
- *   2. 注入 gremlins.js
+ *   2. 注入 gremlins.js（self-hosted，避免 CSP script-src 擋外部 CDN）
  *   3. 放出 gremlins（隨機點擊 / 打字 / 滾動）
  *   4. 監聽 window 'error' 與 console.error
  *   5. 若出現未處理的 JS error 則 fail
@@ -13,7 +15,11 @@ import { test, expect } from '@playwright/test';
 const PAGES = (process.env.MONKEY_PAGES || '/').split(',').map(s => s.trim()).filter(Boolean);
 const ATTACKS = parseInt(process.env.MONKEY_ATTACKS || '500', 10);
 const DELAY_MS = parseInt(process.env.MONKEY_DELAY_MS || '10', 10);
-const GREMLINS_CDN = 'https://unpkg.com/gremlins.js@2.2.0/dist/gremlins.min.js';
+
+// 從 node_modules 讀 gremlins.min.js — 用 page.evaluate(<code>) 注入（走 CDP，
+// 不會建立 <script> 元素，因此不受目標站 CSP script-src 限制）
+const GREMLINS_PATH = path.join(__dirname, '..', 'node_modules', 'gremlins.js', 'dist', 'gremlins.min.js');
+const GREMLINS_CODE = fs.readFileSync(GREMLINS_PATH, 'utf-8');
 
 for (const pagePath of PAGES) {
   test(`monkey attack on ${pagePath}`, async ({ page }) => {
@@ -36,7 +42,8 @@ for (const pagePath of PAGES) {
     expect(response, `should get a response for ${pagePath}`).not.toBeNull();
     expect(response!.status(), `initial load should be < 500`).toBeLessThan(500);
 
-    await page.addScriptTag({ url: GREMLINS_CDN });
+    // 注入 gremlins.js — 用 evaluate 而非 addScriptTag，避開 CSP
+    await page.evaluate(GREMLINS_CODE);
 
     const summary = await page.evaluate(
       async ({ attacks, delay }) => {

@@ -87,13 +87,17 @@ function trend(cur, prev, lowerIsBetter = true) {
 
 // ─── ① SSL ────────────────────────────────────────────────
 function parseSSL() {
-  const files = findRawGlob(/^testssl-.*\.html$/);
-  if (!files.length) return { status: 'no-report' };
-  const latest = files[files.length - 1];
-  const html = read(latest);
+  // 新格式：固定檔名 testssl.html；舊格式 testssl-<timestamp>.html 也接（向後相容）
+  let target = findRaw('testssl.html');
+  if (!target) {
+    const files = findRawGlob(/^testssl-.*\.html$/);
+    if (!files.length) return { status: 'no-report' };
+    target = files[files.length - 1];
+  }
+  const html = read(target);
   const grade = (html.match(/Overall Grade\s*<\/span>\s*<span[^>]*>([A-F][+\-]?)/) || [])[1] || 'N/A';
   const score = (html.match(/Final Score\s*<\/span>\s*(\d+)/) || [])[1] || 'N/A';
-  return { grade, score, file: path.basename(latest) };
+  return { grade, score, file: path.basename(target) };
 }
 
 // ─── ② PHPStan ───────────────────────────────────────────
@@ -204,6 +208,30 @@ function extractFails(xml, withClassname = true) {
     }
   }
   return fails;
+}
+
+// ─── ⑤ API 測試 (Newman, 多身分) ───────────────────────
+function parseAPI() {
+  const files = findRawGlob(/^newman-junit-.+\.xml$/);
+  if (!files.length) return { status: 'no-report' };
+  const identities = [];
+  let total = 0, totalFails = 0;
+  for (const f of files) {
+    // newman-junit-admin.xml → admin；newman-junit-user1-line_signup.xml → user1-line_signup
+    const idMatch = path.basename(f).match(/^newman-junit-(.+)\.xml$/);
+    const identity = idMatch ? idMatch[1] : path.basename(f);
+    try {
+      const xml = read(f);
+      const { tests, failures, errors } = countJUnit(xml);
+      const fails = extractFails(xml, false).slice(0, 10); // 前 10 個失敗
+      identities.push({ identity, tests, failures: failures + errors, fails });
+      total += tests;
+      totalFails += failures + errors;
+    } catch (e) {
+      identities.push({ identity, status: 'parse-error', error: e.message });
+    }
+  }
+  return { identities, total, totalFails };
 }
 
 // ─── ⑥ Playwright ────────────────────────────────────────
@@ -383,6 +411,7 @@ const s  = parseSSL();
 const ps = parsePHPStan();
 const z  = parseZAP();
 const k  = parseK6();
+const api = parseAPI();
 const pw = parsePlaywright();
 const nu = parseNuclei();
 const lh = parseLighthouse();
@@ -451,6 +480,17 @@ if (k.status === 'no-report') {
 } else {
   const p95 = Math.round(k.p95Ms);
   L.push(`④ 壓力測試        p95=${p95}ms  fail=${k.failedPct.toFixed(2)}%  reqs=${k.totalReqs}${trend(p95, prev?.k6?.p95)}`);
+}
+
+// ⑤ API 測試（多身分）
+if (api.status === 'no-report') {
+  L.push('⑤ API 測試        (無報告／未啟用)');
+} else {
+  const passLine = api.identities
+    .filter(i => i.tests != null)
+    .map(i => `${i.identity}: ${i.tests - i.failures}/${i.tests}`)
+    .join('  ');
+  L.push(`⑤ API 測試        ${passLine}${trend(api.totalFails, prev?.api?.totalFails)}`);
 }
 
 // ⑥
@@ -578,6 +618,28 @@ if (!k.status) {
   L.push(`- avg：${Math.round(k.avgMs)}ms  |  p95：${Math.round(k.p95Ms)}ms`);
   L.push(`- 失敗率：${k.failedPct.toFixed(2)}%`);
   L.push('');
+}
+
+// ⑤ API 測試
+if (api.status !== 'no-report' && api.identities?.length) {
+  L.push(`### ⑤ API 測試 Newman (${api.identities.length} 身分, ${api.total - api.totalFails}/${api.total} pass)`);
+  L.push('');
+  for (const id of api.identities) {
+    if (id.status === 'parse-error') {
+      L.push(`- **${id.identity}**：解析失敗 — ${id.error}`);
+      continue;
+    }
+    L.push(`**${id.identity}** — ${id.tests - id.failures}/${id.tests} pass${id.failures ? `, ${id.failures} fail` : ''}`);
+    L.push('');
+    if (id.fails?.length) {
+      for (const f of id.fails) {
+        L.push(`- ❌ ${f.test}${f.message ? `  —  ${f.message}` : ''}`);
+      }
+      L.push('');
+    }
+    L.push(`- 原始報告：[\`raw/newman-junit-${id.identity}.xml\`](raw/newman-junit-${id.identity}.xml)`);
+    L.push('');
+  }
 }
 
 // ⑥ Playwright failures
@@ -715,6 +777,9 @@ const entry = {
     reqs: k.totalReqs,
   },
   e2e: pw.status ? null : { tests: pw.tests, failures: pw.failures },
+  api: api.status ? null : {
+    identities: api.identities.length, total: api.total, totalFails: api.totalFails,
+  },
   nuclei: nu.status ? null : {
     total: nu.total, critical: nu.critical, high: nu.high, medium: nu.medium, low: nu.low,
   },
@@ -752,10 +817,11 @@ L.push('所有工具原始輸出於 [`raw/`](raw/)：');
 L.push('');
 L.push('| 檔案 | 用途 |');
 L.push('|------|------|');
-L.push('| `raw/testssl-*.html/.json` | SSL 詳細 |');
+L.push('| `raw/testssl.html/.json` | SSL 詳細 |');
 L.push('| `raw/phpstan.json` | PHPStan 原始 JSON |');
 L.push('| `raw/zap-report.html/.json` | ZAP 完整報告 |');
 L.push('| `raw/k6-summary.json` | k6 metrics |');
+L.push('| `raw/newman-junit-*.xml` | API 測試（每身分一份）|');
 L.push('| `raw/playwright/index.html` | Playwright HTML 報告 |');
 L.push('| `raw/nuclei.jsonl` | Nuclei findings（JSONL）|');
 L.push('| `raw/lighthouse-manifest.json` `raw/lighthouse-*.report.html` | Lighthouse 摘要 + 每頁 HTML |');
@@ -790,6 +856,11 @@ const structured = {
   },
   e2e: pw.status ? { status: pw.status } : {
     tests: pw.tests, failures: pw.failures, fails: pw.fails,
+  },
+  api: api.status ? { status: api.status } : {
+    identities: api.identities,
+    total: api.total,
+    total_failures: api.totalFails,
   },
   nuclei: nu.status ? { status: nu.status } : {
     total: nu.total, critical: nu.critical, high: nu.high,

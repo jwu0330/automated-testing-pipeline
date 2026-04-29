@@ -262,13 +262,6 @@ enabled() {
     esac
 }
 
-# ─── testssl 歷史輪替（只留最近 3 份）────
-prune_testssl() {
-    local keep=3
-    ls -1t "$REPORTS_RAW"/testssl-*.html 2>/dev/null | tail -n +$((keep+1)) | xargs -r rm -f
-    ls -1t "$REPORTS_RAW"/testssl-*.json 2>/dev/null | tail -n +$((keep+1)) | xargs -r rm -f
-}
-
 # ─── 06 Security - SSL Scan ───
 run_ssl() {
     enabled ssl || { echo "⏭  06 Security - SSL Scan：略過"; return 0; }
@@ -276,7 +269,6 @@ run_ssl() {
     echo "▶ 06 Security - SSL Scan (testssl.sh)"
     echo "──────────────────────────────────────────"
     docker compose --profile ssl up --build --abort-on-container-exit || echo "  (testssl 結束碼 $?)"
-    prune_testssl
 }
 
 # ─── 11 Security - ZAP ───

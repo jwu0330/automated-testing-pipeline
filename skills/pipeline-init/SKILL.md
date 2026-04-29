@@ -97,7 +97,15 @@ In the **current working directory** (the user's target project, not the pipelin
 
 ## Step 4 — Auto-detect OpenAPI spec
 
-Search the project for OpenAPI files. Use Glob with these patterns (first match wins):
+**Priority 1 — Default path (`local/doc/openapi.yaml`)**: This is the hard-coded default. Try it first:
+
+```bash
+test -f local/doc/openapi.yaml && echo "USING DEFAULT"
+```
+
+If found, use it. Skip further searching.
+
+**Priority 2 — Fallback search** (only if default missing). Use Glob with these patterns (first match wins):
 
 1. `.testing/api/openapi.{yaml,yml,json}`  ← canonical location
 2. `openapi.{yaml,yml,json}` at project root
@@ -106,13 +114,13 @@ Search the project for OpenAPI files. Use Glob with these patterns (first match 
 5. `api/openapi.{yaml,yml,json}` / `api-spec.{yaml,yml,json}`
 6. `**/openapi.{yaml,yml,json}` (broad fallback, exclude `node_modules`, `vendor`, `.git`)
 
-If you find one:
-- Verify it's actually an OpenAPI 3.x spec by reading the first ~10 lines and checking for `openapi: 3.` or `"openapi": "3.` (or `swagger: "2.0"` for legacy).
-- Note the **path relative to project root**.
+For the chosen file:
+- Verify it's actually an OpenAPI 3.x spec (read first ~10 lines, look for `openapi: 3.` / `"openapi": "3.` / `swagger: "2.0"` legacy).
+- Note path relative to project root.
 
-If nothing found, that's fine — the project may not have an API. Tell the user; offer two options:
-- (a) Drop a spec at `.testing/api/openapi.yaml` later and rerun init
-- (b) Continue without API tests (pipeline will skip silently)
+If nothing found:
+- Write `tests.api-test.openapi: local/doc/openapi.yaml` to testing.yml anyway (the hard-coded default — user can fix later)
+- Tell the user: "no spec found at default `local/doc/openapi.yaml` or in usual places. Drop one there and `/pipeline-run` will pick it up. Or continue without API tests."
 
 ## Step 5 — Create `.testing/` kit
 

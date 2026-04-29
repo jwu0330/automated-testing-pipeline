@@ -36,6 +36,11 @@ project:
 # 想**覆寫**預設時才填下面；想停用某項寫 `enabled: false`。
 # ────────────────────────────────────────────────────────────
 
+# 預設值：OpenAPI 路徑寫死為 local/doc/openapi.yaml；不在這位置才改
+tests:
+  api-test:
+    openapi: local/doc/openapi.yaml
+
 # tests:
 #   static:
 #     level: 7                           # 預設 5，要更嚴就填
