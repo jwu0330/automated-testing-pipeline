@@ -178,7 +178,9 @@ bash scripts/run-project.sh <name> security   # 單一測試類型
 ## 文件
 
 - **[`docs/QUICKSTART.md`](./docs/QUICKSTART.md)** ★ **從這裡開始**：15 分鐘上手；含 v0.5 release notes
-- **[`.claude/skills/pipeline-onboard/SKILL.md`](./.claude/skills/pipeline-onboard/SKILL.md)** ★ Claude Code Skill：在 Claude Code 內輸入 `/pipeline-onboard` 自動化導入
+- **[`skills/README.md`](./skills/README.md)** ★ Claude Code Skills（獨立發行）：
+  - `/pipeline-init` — 偵測 OpenAPI、建立 `.testing/`、註冊專案（不跑測試）
+  - `/pipeline-run` — 讀設定、執行 pipeline、摘要報告（不改設定）
 - **[`.testing/README.md`](./.testing/README.md)** ★ 新專案導入（必要 vs 可選、固定流程、一鍵指令）
 - [docs/project-convention.md](./docs/project-convention.md) — 專案測試規範（深入參考）
 - [docs/run-tests.md](./docs/run-tests.md) — 操作手冊 + n8n 工作流
