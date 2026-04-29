@@ -19,20 +19,13 @@
 
 ```bash
 cd /path/to/your-project
-mkdir -p .claude/skills
+mkdir -p .claude/skills/pipeline-init .claude/skills/pipeline-run
 
-# 從 GitHub release 下載並解壓
-curl -L https://github.com/jwu0330/automated-testing-pipeline/releases/latest/download/skills.tar.gz \
-  | tar -xz -C .claude/skills
-```
+curl -L https://github.com/jwu0330/automated-testing-pipeline/releases/latest/download/pipeline-init_SKILL.md \
+  -o .claude/skills/pipeline-init/SKILL.md
 
-或 git clone 後手動複製：
-
-```bash
-git clone --depth 1 git@github.com:jwu0330/automated-testing-pipeline.git /tmp/atp
-cp -r /tmp/atp/skills/pipeline-init /tmp/atp/skills/pipeline-run \
-      /path/to/your-project/.claude/skills/
-rm -rf /tmp/atp
+curl -L https://github.com/jwu0330/automated-testing-pipeline/releases/latest/download/pipeline-run_SKILL.md \
+  -o .claude/skills/pipeline-run/SKILL.md
 ```
 
 ### 方式 B：複製到 `~/.claude/skills/`（使用者級，全電腦可用）
@@ -40,9 +33,13 @@ rm -rf /tmp/atp
 所有專案都能呼叫：
 
 ```bash
-mkdir -p ~/.claude/skills
-curl -L https://github.com/jwu0330/automated-testing-pipeline/releases/latest/download/skills.tar.gz \
-  | tar -xz -C ~/.claude/skills
+mkdir -p ~/.claude/skills/pipeline-init ~/.claude/skills/pipeline-run
+
+curl -L https://github.com/jwu0330/automated-testing-pipeline/releases/latest/download/pipeline-init_SKILL.md \
+  -o ~/.claude/skills/pipeline-init/SKILL.md
+
+curl -L https://github.com/jwu0330/automated-testing-pipeline/releases/latest/download/pipeline-run_SKILL.md \
+  -o ~/.claude/skills/pipeline-run/SKILL.md
 ```
 
 ---
