@@ -29,7 +29,9 @@ if [ -z "$NAME" ] || [ -z "$TARGET_URL" ]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-command -v yq &>/dev/null || { echo "❌ 需要 yq（Go 版）" >&2; exit 1; }
+
+# 自動補齊 yq（host 只需要 Docker）
+source "$ROOT/scripts/lib/bootstrap.sh"
 
 # ─── 決定寫入目錄：有效 local_path → 真專案；否則 → ephemeral ──
 # 不論模式，最終目錄結構都是 <registry_path>/.testing/testing.yml

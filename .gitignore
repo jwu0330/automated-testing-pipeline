@@ -4,6 +4,9 @@ reports/
 # OpenAPI → Postman collection 自動轉換的暫存產物
 .tmp-collections/
 
+# bootstrap.sh 自動下載的 vendored 工具（yq 等）
+bin/
+
 # 環境變數（含敏感資訊）
 .env
 

@@ -42,7 +42,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 REGISTRY="$ROOT/projects.registry.yml"
-command -v yq &>/dev/null || { echo "❌ 需要 yq（Go 版）"; exit 1; }
+
+# 自動補齊 yq（host 只需要 Docker）
+source "$ROOT/scripts/lib/bootstrap.sh"
+
 [ -f "$REGISTRY" ] || { echo "❌ 找不到 $REGISTRY，請先 register-project.sh"; exit 1; }
 
 # ─── 從 registry 找到 testing.yml ───
@@ -673,7 +676,7 @@ run_summary() {
     echo "▶ 15 Report - Parse Results"
     echo "▶ 16 Report - Generate Scorecard"
     echo "──────────────────────────────────────────"
-    node "$ROOT/scripts/summarize.js" "$NAME"
+    node_run "$ROOT/scripts/summarize.js" "$NAME"
 }
 
 # ─── Preset 展開：ALL / REMOTE_ONLY / LOCAL_ONLY → 具體 scope 列表 ────

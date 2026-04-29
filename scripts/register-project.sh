@@ -22,6 +22,9 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REGISTRY="$ROOT/projects.registry.yml"
 
+# 自動補齊 yq（host 只需要 Docker）
+source "$ROOT/scripts/lib/bootstrap.sh"
+
 # ─── 驗證專案路徑 ───
 if [ ! -d "$PROJECT_PATH" ]; then
     echo "❌ 路徑不存在：$PROJECT_PATH"
@@ -48,14 +51,6 @@ if [ ! -f "$PROJECT_PATH/.testing/.env.example" ]; then
     echo "      cp $ROOT/scripts/env.example \"$PROJECT_PATH/.testing/.env.example\""
     echo "      cp \"$PROJECT_PATH/.testing/.env.example\" \"$PROJECT_PATH/.testing/.env\""
     echo ""
-fi
-
-# ─── 檢查 yq ───
-if ! command -v yq &> /dev/null; then
-    echo "❌ 需要安裝 yq（Go 版）："
-    echo "   sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
-    echo "   sudo chmod +x /usr/local/bin/yq"
-    exit 1
 fi
 
 # ─── 初始化 registry ───

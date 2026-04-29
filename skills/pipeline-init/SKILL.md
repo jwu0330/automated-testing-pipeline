@@ -72,17 +72,17 @@ If the pipeline isn't there, stop and tell the user how to get it (`git clone gi
 
 ## Step 2 — Verify prerequisites
 
-Check tools **inside the chosen env**, not in the local shell:
+**The pipeline only requires Docker on the host.** `yq` is auto-downloaded into `<pipeline>/bin/yq` on first script invocation; `node` falls back to a Docker image if missing. So check only Docker:
 
 ```bash
 # ENV=wsl / native:
-docker --version; docker compose version; yq --version; node --version
+docker --version; docker compose version
 
 # ENV=win-with-wsl:
-wsl.exe bash -c 'docker --version; docker compose version; yq --version; node --version'
+wsl.exe bash -c 'docker --version; docker compose version'
 ```
 
-Surface anything missing with the install command (and remind the user it must be installed **in WSL**, not Windows). Don't install for the user.
+If Docker is missing in WSL, surface the install link (<https://docs.docker.com/engine/install/>) and stop. Don't install for the user.
 
 ## Step 3 — Gather project context
 
