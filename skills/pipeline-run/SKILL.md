@@ -120,10 +120,20 @@ Stream output. Don't `&` / background — the user wants to see progress.
 
 ## Step 6 — Surface results
 
-After it finishes, read the report (via env helper since reports live under the WSL-side pipeline path):
+After it finishes, read the report. **v0.6+ stores reports inside the project**, not the pipeline:
+
+- 有 `local_path` 的專案 → `<local_path>/.testing/reports/report.md`
+- 無 `local_path`（純遠端測試） → `<pipeline>/.tmp-reports/<name>/report.md`
+
+Resolve the right one from `testing.yml`:
 
 ```bash
-REPORT_DIR="$PIPELINE_HOME/reports/$NAME"
+LOCAL_PATH=$(yq -r '.project.local_path // ""' .testing/testing.yml)
+if [ -n "$LOCAL_PATH" ]; then
+    REPORT_DIR="$LOCAL_PATH/.testing/reports"
+else
+    REPORT_DIR="$PIPELINE_HOME/.tmp-reports/$NAME"
+fi
 
 # ENV=wsl / native:
 test -f "$REPORT_DIR/report.md" && head -60 "$REPORT_DIR/report.md"
@@ -142,9 +152,11 @@ Highlight in your reply:
 End with:
 
 ```
-📊 Full report: <pipeline>/reports/<name>/report.md
-📁 Raw outputs: <pipeline>/reports/<name>/raw/
+📊 Full report: <REPORT_DIR>/report.md
+📁 Raw outputs: <REPORT_DIR>/raw/
 ```
+
+(`<REPORT_DIR>` is the path resolved above — typically `<your-project>/.testing/reports/`.)
 
 If `report.json` shows `overallScore < 80` or has parse errors, end with a single sentence stating what to fix first.
 

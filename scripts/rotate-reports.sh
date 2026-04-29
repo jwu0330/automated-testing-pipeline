@@ -24,7 +24,9 @@ if [ -z "$NAME" ]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REPORT_DIR="$ROOT/reports/$NAME"
+
+# 優先使用 run-project.sh 設定的 REPORTS_DIR；否則退回舊路徑（向後相容手動呼叫）
+REPORT_DIR="${REPORTS_DIR:-$ROOT/reports/$NAME}"
 ARCHIVE_DIR="$REPORT_DIR/archive"
 
 [ -d "$REPORT_DIR" ] || { echo "  ℹ️  $REPORT_DIR 不存在，跳過輪替"; exit 0; }

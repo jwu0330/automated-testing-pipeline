@@ -1,5 +1,8 @@
-# 測試報告（每次執行重新產生）
+# 測試報告：v0.6 起改寫進 <project>/.testing/reports/，pipeline 端只剩
+#   - reports/  → 殘留的舊資料 / 備援 staging（保留 ignore 以防）
+#   - .tmp-reports/ → 純遠端測試（無 local_path）的暫存報告
 reports/
+.tmp-reports/
 
 # OpenAPI → Postman collection 自動轉換的暫存產物
 .tmp-collections/

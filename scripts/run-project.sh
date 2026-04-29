@@ -106,7 +106,14 @@ fi
 export TARGET_URL PROJECT_NAME="$NAME"
 
 # ─── reports 目錄（raw/ 放原始輸出）─────────────────────────
-REPORTS_DIR="$ROOT/reports/$NAME"
+# 設計原則：這個 repo 是工具，不應儲存其他專案的測試結果。
+#   - 有 local_path → 報告寫進 <project>/.testing/reports/（跟著專案走）
+#   - 無 local_path（純遠端測試）→ <pipeline>/.tmp-reports/<name>/（gitignore，可隨時清）
+if $LOCAL_MODE; then
+    REPORTS_DIR="$PROJECT_PATH/.testing/reports"
+else
+    REPORTS_DIR="$ROOT/.tmp-reports/$NAME"
+fi
 REPORTS_RAW="$REPORTS_DIR/raw"
 mkdir -p "$REPORTS_RAW"
 
@@ -119,8 +126,9 @@ if [ -f "$REPORTS_DIR/n8n-precheck-warnings.txt" ]; then
     rm -f "$REPORTS_DIR/n8n-precheck-warnings.txt"
 fi
 
-# Docker 內部看到的 raw 路徑（所有工具寫這裡）
-export REPORTS_RAW_DIR="$REPORTS_RAW"
+# 給下游程式（compose volume 插值、summarize.js）使用的環境變數
+export REPORTS_DIR REPORTS_RAW
+export REPORTS_RAW_DIR="$REPORTS_RAW"  # docker-compose volumes 用
 
 # ─── 報告輪替：每次開跑前把超過 REPORTS_KEEP_DAYS 天的舊報告打包進 archive/
 #     關閉方式：REPORTS_KEEP_DAYS=0（或 export REPORTS_NO_ROTATE=1）
@@ -254,16 +262,6 @@ enabled() {
     esac
 }
 
-# ─── 搬移工具原始輸出 → raw/ ────
-move_report() {
-    local glob="$1"
-    # shellcheck disable=SC2086
-    for f in $ROOT/reports/$glob; do
-        [ -e "$f" ] || continue
-        mv "$f" "$REPORTS_RAW/"
-    done
-}
-
 # ─── testssl 歷史輪替（只留最近 3 份）────
 prune_testssl() {
     local keep=3
@@ -278,8 +276,6 @@ run_ssl() {
     echo "▶ 06 Security - SSL Scan (testssl.sh)"
     echo "──────────────────────────────────────────"
     docker compose --profile ssl up --build --abort-on-container-exit || echo "  (testssl 結束碼 $?)"
-    move_report 'testssl-*.html'
-    move_report 'testssl-*.json'
     prune_testssl
 }
 
@@ -290,8 +286,6 @@ run_security() {
     echo "▶ 11 Security - ZAP (OWASP ZAP)"
     echo "──────────────────────────────────────────"
     docker compose --profile security up --abort-on-container-exit || echo "  (zap 結束碼 $?；2=發現警告)"
-    move_report 'zap-report.html'
-    move_report 'zap-report.json'
 }
 
 # ─── 12 Performance - Load Test ───
@@ -304,7 +298,6 @@ run_stress() {
     K6_DURATION=$(yq -r '.tests.stress.duration // "30s"' "$TESTING_YML")
     export K6_VUS K6_DURATION
     docker compose --profile stress up --abort-on-container-exit || echo "  (k6 結束碼 $?)"
-    move_report 'k6-*.json'
 }
 
 # ─── 03 Code - Static Analysis ───
@@ -371,9 +364,8 @@ run_nuclei() {
     NUCLEI_SEVERITY=$(yq -r '.tests.nuclei.severity // "critical,high,medium"' "$TESTING_YML")
     NUCLEI_RATE_LIMIT=$(yq -r '.tests.nuclei.rate_limit // 50' "$TESTING_YML")
     export NUCLEI_SEVERITY NUCLEI_RATE_LIMIT
-    rm -f "$ROOT/reports/nuclei.jsonl" 2>/dev/null || true
+    rm -f "$REPORTS_RAW/nuclei.jsonl" 2>/dev/null || true
     docker compose --profile nuclei up --abort-on-container-exit || echo "  (nuclei 結束碼 $?)"
-    move_report 'nuclei.jsonl'
     echo "  報告：$REPORTS_RAW/nuclei.jsonl"
 }
 
@@ -389,11 +381,8 @@ run_lighthouse() {
     LIGHTHOUSE_PRESET=$(yq -r '.tests.lighthouse.preset // "desktop"' "$TESTING_YML")
     export LIGHTHOUSE_PAGES LIGHTHOUSE_PRESET
     # 清理舊 lighthouse 報告（只留本次）
-    rm -f "$ROOT/reports"/lighthouse-*.report.* "$ROOT/reports/lighthouse-manifest.json" 2>/dev/null || true
+    rm -f "$REPORTS_RAW"/lighthouse-*.report.* "$REPORTS_RAW/lighthouse-manifest.json" 2>/dev/null || true
     docker compose --profile lighthouse up --build --abort-on-container-exit || echo "  (lighthouse 結束碼 $?)"
-    move_report 'lighthouse-*.report.html'
-    move_report 'lighthouse-*.report.json'
-    move_report 'lighthouse-manifest.json'
     echo "  報告：$REPORTS_RAW/lighthouse-manifest.json"
 }
 
@@ -410,15 +399,15 @@ run_monkey() {
     local env_args=()
     [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
     # 清舊報告
-    rm -f "$ROOT/reports/monkey-report.json" 2>/dev/null || true
-    rm -rf "$ROOT/reports/monkey-html" 2>/dev/null || true
+    rm -f "$REPORTS_RAW/monkey-report.json" 2>/dev/null || true
+    rm -rf "$REPORTS_RAW/monkey-html" 2>/dev/null || true
     docker run --rm "${env_args[@]}" \
         -e TARGET_URL="$TARGET_URL" \
         -e MONKEY_PAGES="$pages" \
         -e MONKEY_ATTACKS="$attacks" \
         -e MONKEY_DELAY_MS="$delay" \
         -v "$ROOT/tests/monkey:/monkey" \
-        -v "$ROOT/reports:/reports" \
+        -v "$REPORTS_RAW:/reports" \
         -w /monkey \
         mcr.microsoft.com/playwright:v1.59.1-noble \
         sh -c '
@@ -430,12 +419,6 @@ run_monkey() {
             npx playwright test
         ' \
         || echo "  (monkey 結束碼 $?)"
-    move_report 'monkey-report.json'
-    # monkey-html 是目錄，需另外搬
-    if [ -d "$ROOT/reports/monkey-html" ]; then
-        rm -rf "$REPORTS_RAW/monkey-html"
-        mv "$ROOT/reports/monkey-html" "$REPORTS_RAW/"
-    fi
     echo "  報告：$REPORTS_RAW/monkey-report.json、$REPORTS_RAW/monkey-html/index.html"
 }
 
@@ -475,9 +458,8 @@ run_links() {
     LYCHEE_TIMEOUT=$(yq -r '.tests.links.timeout // 15' "$TESTING_YML")
     LYCHEE_MAX_CONCURRENCY=$(yq -r '.tests.links.max_concurrency // 4' "$TESTING_YML")
     export LYCHEE_TIMEOUT LYCHEE_MAX_CONCURRENCY
-    rm -f "$ROOT/reports/lychee.json" 2>/dev/null || true
+    rm -f "$REPORTS_RAW/lychee.json" 2>/dev/null || true
     docker compose --profile links up --abort-on-container-exit || echo "  (lychee 結束碼 $?)"
-    move_report 'lychee.json'
     echo "  報告：$REPORTS_RAW/lychee.json"
 }
 

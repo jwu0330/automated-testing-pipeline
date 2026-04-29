@@ -9,7 +9,7 @@ services:
     container_name: testssl-runner
     volumes:
       - ./tests/ssl:/workspace/tests
-      - ./reports:/workspace/reports
+      - ${REPORTS_RAW_DIR:-./reports}:/workspace/reports
     env_file:
       - .env
     environment:
@@ -27,7 +27,7 @@ services:
     image: ghcr.io/zaproxy/zaproxy:stable
     container_name: zap-scanner
     volumes:
-      - ./reports:/zap/wrk
+      - ${REPORTS_RAW_DIR:-./reports}:/zap/wrk
     env_file:
       - .env
     command: >
@@ -48,7 +48,7 @@ services:
     container_name: k6-runner
     volumes:
       - ./tests/stress:/scripts
-      - ./reports:/reports
+      - ${REPORTS_RAW_DIR:-./reports}:/reports
     env_file:
       - .env
     environment:
@@ -71,7 +71,7 @@ services:
     image: projectdiscovery/nuclei:latest
     container_name: nuclei-scanner
     volumes:
-      - ./reports:/reports
+      - ${REPORTS_RAW_DIR:-./reports}:/reports
     env_file:
       - .env
     environment:
@@ -108,7 +108,7 @@ services:
     container_name: lighthouse-runner
     volumes:
       - ./tests/lighthouse:/work
-      - ./reports:/reports
+      - ${REPORTS_RAW_DIR:-./reports}:/reports
     env_file:
       - .env
     environment:
@@ -127,7 +127,7 @@ services:
     image: lycheeverse/lychee:latest
     container_name: lychee-runner
     volumes:
-      - ./reports:/reports
+      - ${REPORTS_RAW_DIR:-./reports}:/reports
     env_file:
       - .env
     environment:
@@ -160,7 +160,7 @@ services:
     container_name: playwright-runner
     volumes:
       - ./tests/e2e:/workspace
-      - ./reports:/reports
+      - ${REPORTS_RAW_DIR:-./reports}:/reports
     env_file:
       - .env
     working_dir: /workspace

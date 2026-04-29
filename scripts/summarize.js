@@ -22,7 +22,12 @@ if (!project) {
 }
 
 const ROOT = path.resolve(__dirname, '..');
-const REPORT_DIR = path.join(ROOT, 'reports', project);
+
+// 報告目錄解析：優先使用環境變數（由 run-project.sh 設定指向專案 .testing/reports/），
+// 否則退回舊路徑（pipeline/reports/<project>）以保向後相容
+const REPORT_DIR = process.env.REPORTS_DIR
+  ? path.resolve(process.env.REPORTS_DIR)
+  : path.join(ROOT, 'reports', project);
 const RAW = path.join(REPORT_DIR, 'raw');
 
 if (!fs.existsSync(REPORT_DIR)) {

@@ -175,7 +175,13 @@ E2E_PASSWORD=
 Generate **`.testing/.gitignore`**:
 
 ```
+# 測試敏感值
 .env
+
+# 測試結果（pipeline 寫進這裡，每次執行覆蓋）
+reports/
+
+# 暫存產物
 ephemeral/
 ```
 
