@@ -203,18 +203,49 @@ enabled() {
             ;;
         links)      return 0 ;;
         api-test)
-            if ! $LOCAL_MODE; then
-                WARNINGS+=("api-test：local_path 未設/不存在，跳過 API 測試")
+            # 防護機制：API 測試是「按需」啟用，不是每個系統都有 API 可測。
+            # 偵測順序：① 現成 collection → ② 從 OpenAPI 自動產 collection → ③ 都沒有就靜靜跳過
+            API_OPENAPI_RESOLVED=""
+            # ① 專案已備好 Postman collection
+            if [ -n "$PROJECT_PATH" ] && \
+               ls "$PROJECT_PATH/.testing/api/collections/"*.postman_collection.json >/dev/null 2>&1; then
+                if [ -z "${ADMIN_USERNAME:-}" ] || [ -z "${ADMIN_PASSWORD:-}" ]; then
+                    WARNINGS+=("api-test：ADMIN_USERNAME/PASSWORD 未提供，API/Auth 測試身分可能不完整")
+                fi
+                return 0
+            fi
+            # ② testing.yml 指定 OpenAPI 路徑（絕對 or 相對 local_path）
+            local openapi_yml
+            openapi_yml=$(yq -r '.tests.api-test.openapi // ""' "$TESTING_YML")
+            if [ -n "$openapi_yml" ] && [ "$openapi_yml" != "null" ]; then
+                if [[ "$openapi_yml" != /* ]] && [ -n "$PROJECT_PATH" ]; then
+                    openapi_yml="$PROJECT_PATH/$openapi_yml"
+                fi
+                if [ -f "$openapi_yml" ]; then
+                    API_OPENAPI_RESOLVED="$openapi_yml"
+                else
+                    WARNINGS+=("api-test：testing.yml 指定的 openapi 路徑不存在：$openapi_yml → 跳過")
+                    return 1
+                fi
+            fi
+            # ③ 自動偵測 .testing/api/openapi.{yaml,yml,json}
+            if [ -z "$API_OPENAPI_RESOLVED" ] && [ -n "$PROJECT_PATH" ]; then
+                for ext in yaml yml json; do
+                    if [ -f "$PROJECT_PATH/.testing/api/openapi.$ext" ]; then
+                        API_OPENAPI_RESOLVED="$PROJECT_PATH/.testing/api/openapi.$ext"
+                        break
+                    fi
+                done
+            fi
+            # 都沒有 → 安靜跳過（不是錯誤；不是每個系統都需要 API 測試）
+            if [ -z "$API_OPENAPI_RESOLVED" ]; then
+                WARNINGS+=("api-test：未提供 Postman collection 也未提供 OpenAPI 規格 → 跳過 API 測試")
                 return 1
             fi
-            if ! ls "$PROJECT_PATH/.testing/api/collections/"*.postman_collection.json >/dev/null 2>&1; then
-                WARNINGS+=("api-test：未偵測到 Postman collection，跳過 API 測試")
-                return 1
-            fi
-            # 附加檢查 admin 帳密
             if [ -z "${ADMIN_USERNAME:-}" ] || [ -z "${ADMIN_PASSWORD:-}" ]; then
                 WARNINGS+=("api-test：ADMIN_USERNAME/PASSWORD 未提供，API/Auth 測試身分可能不完整")
             fi
+            export API_OPENAPI_RESOLVED
             return 0
             ;;
     esac
@@ -457,9 +488,36 @@ run_api_test() {
     echo "▶ API / Auth 測試 (Newman, 多身分迴圈)"
     echo "──────────────────────────────────────────"
 
-    # 尋找專案客製 collection（必要），pipeline 通用版僅當骨架回退
-    local collection
-    collection=$(find "$PROJECT_PATH/.testing/api/collections" -name "*.postman_collection.json" 2>/dev/null | head -1 || echo "")
+    # 尋找 collection：① 專案備好的 → ② 從 OpenAPI 即時轉換 → ③ pipeline 骨架（最後備援）
+    local collection=""
+    if [ -n "$PROJECT_PATH" ]; then
+        collection=$(find "$PROJECT_PATH/.testing/api/collections" -name "*.postman_collection.json" 2>/dev/null | head -1 || echo "")
+    fi
+
+    if [ -z "$collection" ] && [ -n "${API_OPENAPI_RESOLVED:-}" ] && [ -f "$API_OPENAPI_RESOLVED" ]; then
+        echo "  ▶ 偵測到 OpenAPI 規格 → 自動轉成 Postman collection"
+        echo "    來源：$API_OPENAPI_RESOLVED"
+        # 確保 newman + openapi-to-postmanv2 image 已建置
+        if ! docker image inspect testing-pipeline-newman:latest >/dev/null 2>&1; then
+            echo "    首次建置 testing-pipeline-newman..."
+            bash "$ROOT/scripts/build-newman-image.sh" || true
+        fi
+        local gen_dir="$ROOT/.tmp-collections"
+        mkdir -p "$gen_dir"
+        local generated="$gen_dir/${NAME}.postman_collection.json"
+        docker run --rm \
+            -v "$API_OPENAPI_RESOLVED:/spec/openapi:ro" \
+            -v "$gen_dir:/out" \
+            --entrypoint /workspace/convert-openapi.sh \
+            testing-pipeline-newman:latest \
+            /spec/openapi /out/${NAME}.postman_collection.json \
+            || { echo "  ❌ OpenAPI 轉換失敗，略過 API 測試"; return 0; }
+        if [ -s "$generated" ]; then
+            collection="$generated"
+            echo "    產出：$collection"
+        fi
+    fi
+
     if [ -z "$collection" ]; then
         collection=$(find "$ROOT/tests/api/collections" -name "*.postman_collection.json" 2>/dev/null | head -1 || echo "")
     fi

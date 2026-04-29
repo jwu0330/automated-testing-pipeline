@@ -67,7 +67,8 @@ project:
 | 資料夾 | 觸發條件 | 放什麼 |
 |--------|---------|--------|
 | `e2e/` | 有 `e2e/package.json` → 才會跑 | `package.json` + `playwright.config.ts` + `tests/*.spec.ts` |
-| `api/collections/` | 有 `*.postman_collection.json` → 才會跑 | Postman collection JSON |
+| `api/collections/` | 有 `*.postman_collection.json` → 才會跑 | Postman collection JSON（手寫） |
+| `api/openapi.{yaml,yml,json}` | 自動轉成 Postman collection 後跑 | OpenAPI 3.x 規格檔（首選來源） |
 | `static/phpstan.neon` | 存在 → 覆寫預設 | 客製 PHPStan 設定 |
 | `ssl/*.conf` | 存在 → 覆寫預設 | 客製 testssl.sh 參數 |
 | `security/zap.conf` | 存在 → 覆寫預設 | 自訂 ZAP 規則 |
@@ -156,7 +157,7 @@ bash <pipeline>/scripts/run-project.sh <name> <scope>
 | stress (k6) | 一律開（vus=10, duration=30s, pages=[/]） |
 | static (PHPStan) | `local_path` 有 `.php` 檔就開（level=5） |
 | e2e (Playwright) | `.testing/e2e/package.json` 存在才開 |
-| api-test / auth-test | `.testing/api/collections/*.postman_collection.json` 存在才開 |
+| api-test / auth-test | 任一條件成立才開：`.testing/api/collections/*.postman_collection.json` 存在；或 `.testing/api/openapi.{yaml,yml,json}` 存在；或 `testing.yml:tests.api-test.openapi` 指到一個有效檔。**全部沒有 → 安靜跳過**（純前端站不會被擋） |
 | nuclei | 一律開（severity=critical,high,medium） |
 | lighthouse | 一律開（preset=desktop, pages=[/]） |
 | monkey | 一律開（pages=[/], attacks=500, delay_ms=10） |

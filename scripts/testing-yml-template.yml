@@ -22,7 +22,11 @@ project:
 #   - tests.security.enabled   : 一律開
 #   - tests.stress.enabled     : 一律開（vus=10, duration=30s, pages=[/]）
 #   - tests.e2e.enabled        : .testing/e2e/package.json 存在 → 自動開
-#   - tests.api-test.enabled   : .testing/api/collections/*.postman_collection.json 存在 → 自動開
+#   - tests.api-test.enabled   : 任一條件成立 → 自動開
+#                                ① .testing/api/collections/*.postman_collection.json 存在
+#                                ② tests.api-test.openapi 指向有效 OpenAPI 檔
+#                                ③ .testing/api/openapi.{yaml,yml,json} 存在
+#                                三者都無 → 安靜跳過（不視為錯誤）
 #   - tests.nuclei.enabled     : 一律開（severity=critical,high,medium, rate_limit=50）
 #   - tests.lighthouse.enabled : 一律開（preset=desktop, pages=[/]）
 #   - tests.monkey.enabled     : 一律開（pages=[/], attacks=500, delay_ms=10）
@@ -41,6 +45,10 @@ project:
 #     vus: 20                            # 預設 10（共享主機建議 ≤ 10）
 #     duration: 60s                      # 預設 30s
 #     pages: [/, /login.html, /api/health.php]
+#
+#   api-test:
+#     openapi: api/openapi.yaml          # 路徑可絕對 or 相對 local_path；不填則自動偵測 .testing/api/openapi.{yaml,yml,json}
+#     # enabled: false                   # 強制關閉
 #
 #   e2e:
 #     auth:

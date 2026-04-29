@@ -17,8 +17,11 @@ A3 與 B6 合併為一套 API 測試框架，使用 **Newman**（Postman CLI）�
 
 ## 預備條件
 
-1. **Newman 安裝**：透過 Docker image `testing-pipeline-newman`
-2. **Postman Collection 檔案**：JSON 格式
+1. **Newman 安裝**：透過 Docker image `testing-pipeline-newman`（含 newman + openapi-to-postmanv2）
+2. **測試來源**（任一即可）：
+   - **OpenAPI 規格**（首選）：放在 `.testing/api/openapi.yaml` / `.yml` / `.json`，或在 `testing.yml:tests.api-test.openapi` 指定路徑 → pipeline 會自動轉成 Postman collection
+   - **Postman Collection JSON**（手寫）：放在 `.testing/api/collections/*.postman_collection.json`
+   - 兩者皆無 → API 測試靜悄悄跳過（不視為錯誤；純前端站不需要）
 
 ---
 

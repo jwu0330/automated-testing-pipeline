@@ -57,7 +57,12 @@ project:
 #
 #   # ─── A3 API 驗證 ───
 #   api-test:
-#     enabled: true                       # 有 .testing/api/collections/ 就自動啟用
+#     # 偵測順序：① .testing/api/collections/*.postman_collection.json
+#     #          → ② tests.api-test.openapi（下方 openapi 欄位）
+#     #          → ③ .testing/api/openapi.{yaml,yml,json}
+#     #          三者都沒有 → 安靜跳過（不報錯，適合無 API 的純前端站）
+#     openapi: api/openapi.yaml           # 路徑可絕對 or 相對 local_path
+#     enabled: true                       # 偵測到後自動啟用；明確 false 可強制關閉
 #
 #   # ─── v0.3 新增的 5 個通用測試 ───
 #   nuclei:

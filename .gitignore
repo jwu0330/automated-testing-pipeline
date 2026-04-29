@@ -1,6 +1,9 @@
 # 測試報告（每次執行重新產生）
 reports/
 
+# OpenAPI → Postman collection 自動轉換的暫存產物
+.tmp-collections/
+
 # 環境變數（含敏感資訊）
 .env
 
