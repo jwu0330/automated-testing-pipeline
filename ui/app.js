@@ -42,6 +42,18 @@
   let scopes = [];
   let states = {};
   let downloadUrl = null;
+  let activeES = null;
+  let currentRunning = null;
+
+  // ─── 活躍任務記憶（重整網頁時可恢復跑中狀態）───
+  const SAVE_KEY = 'atp.activeJob';
+  const saveJob = (jobId, picked) => {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ jobId, scopes: picked })); } catch {}
+  };
+  const loadJob = () => {
+    try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { return null; }
+  };
+  const clearJob = () => { try { localStorage.removeItem(SAVE_KEY); } catch {} };
 
   const setStatus = (msg, kind = '') => {
     statusEl.textContent = msg;
@@ -69,6 +81,74 @@
     if (!scope || !(scope in states)) return;
     states[scope] = state;
     render();
+  };
+
+  // ─── 接 SSE：抽出讓「送出」「重整恢復」共用 ───
+  const attachSSE = (jobId) => {
+    if (activeES) { try { activeES.close(); } catch {} }
+    currentRunning = null;
+    const es = new EventSource('/api/logs/' + jobId);
+    activeES = es;
+
+    es.addEventListener('log', (ev) => {
+      const line = ev.data;
+      if (line.startsWith('▶')) {
+        const scope = detectScope(line);
+        if (scope) {
+          if (currentRunning && states[currentRunning] === 'running') setState(currentRunning, 'done');
+          currentRunning = scope;
+          setState(scope, 'running');
+        }
+      } else if (line.startsWith('⏭')) {
+        const scope = detectScope(line);
+        if (scope) setState(scope, 'skipped');
+      }
+    });
+
+    es.addEventListener('done', (ev) => {
+      const info = JSON.parse(ev.data);
+      es.close();
+      activeES = null;
+      submitBtn.disabled = false;
+      for (const s of scopes) {
+        if (states[s] === 'pending' || states[s] === 'running') {
+          states[s] = info.exit_code === 0 ? 'done' : 'failed';
+        }
+      }
+      render();
+      if (info.exit_code === 0) setStatus('完成 ✅', 'ok');
+      else setStatus('結束碼 ' + info.exit_code + '（部分測試可能失敗，仍可下載報告）', 'error');
+
+      if (info.download_url) {
+        downloadUrl = info.download_url;
+        dlBtn.disabled = false;
+        dlBtn.textContent = '⬇ 下載報告 (zip)';
+      } else {
+        dlBtn.textContent = '（無報告可下載）';
+      }
+      // 跑完了 → 清掉活躍記憶；下次重整就是乾淨頁面
+      clearJob();
+    });
+
+    es.addEventListener('error', () => {
+      // EventSource 規格：HTTP 非 200（例如 404 — job 已被清掉）→ readyState=CLOSED 不再重連
+      // 真正的網路斷線 → readyState=CONNECTING 自動重連，不要清狀態
+      if (es.readyState === EventSource.CLOSED) {
+        try { es.close(); } catch {}
+        activeES = null;
+        submitBtn.disabled = false;
+        clearJob();
+        // 若整盤都還是 pending（=「重整恢復」但伺服器其實沒這 job），收掉面板
+        if (Object.values(states).every(s => s === 'pending')) {
+          panel.hidden = true;
+          setStatus('上次任務已結束或不存在', '');
+        } else {
+          setStatus('日誌連線中斷', 'error');
+        }
+      } else {
+        setStatus('日誌連線中斷，重連中…', 'error');
+      }
+    });
   };
 
   // ─── 表單送出 ───
@@ -107,53 +187,8 @@
     }
 
     setStatus('任務已開始：' + data.job_id);
-
-    let currentRunning = null;
-    const es = new EventSource('/api/logs/' + data.job_id);
-
-    es.addEventListener('log', (ev) => {
-      const line = ev.data;
-      if (line.startsWith('▶')) {
-        const scope = detectScope(line);
-        if (scope) {
-          if (currentRunning && states[currentRunning] === 'running') setState(currentRunning, 'done');
-          currentRunning = scope;
-          setState(scope, 'running');
-        }
-      } else if (line.startsWith('⏭')) {
-        const scope = detectScope(line);
-        if (scope) setState(scope, 'skipped');
-      }
-    });
-
-    es.addEventListener('done', (ev) => {
-      const info = JSON.parse(ev.data);
-      es.close();
-      submitBtn.disabled = false;
-      // 清除剩下的 pending / running
-      for (const s of scopes) {
-        if (states[s] === 'pending' || states[s] === 'running') {
-          states[s] = info.exit_code === 0 ? 'done' : 'failed';
-        }
-      }
-      render();
-      if (info.exit_code === 0) setStatus('完成 ✅', 'ok');
-      else setStatus('結束碼 ' + info.exit_code + '（部分測試可能失敗，仍可下載報告）', 'error');
-
-      if (info.download_url) {
-        downloadUrl = info.download_url;
-        dlBtn.disabled = false;
-        dlBtn.textContent = '⬇ 下載報告 (zip)';
-      } else {
-        dlBtn.textContent = '（無報告可下載）';
-      }
-    });
-
-    es.addEventListener('error', () => {
-      es.close();
-      submitBtn.disabled = false;
-      setStatus('日誌連線中斷', 'error');
-    });
+    saveJob(data.job_id, picked);
+    attachSSE(data.job_id);
   });
 
   // ─── 下載按鈕：disabled 時不做任何事；ready 時觸發下載 ───
@@ -202,4 +237,19 @@
     });
   }
 
+  // ─── 頁面載入時：若 localStorage 有活躍任務 → 重建進度 UI + 重連 SSE ───
+  // SSE endpoint 會從 log 檔起點重播，且 status=done 時直接送 done event；
+  // 所以「跑到一半重整」會看到當前進度，「跑完才重整」會收到 done → clearJob → 乾淨頁面
+  const _saved = loadJob();
+  if (_saved && _saved.jobId && Array.isArray(_saved.scopes) && _saved.scopes.length) {
+    const picked = _saved.scopes;
+    scopes = picked.includes('summary') ? picked.slice() : picked.concat(['summary']);
+    states = {};
+    for (const s of scopes) states[s] = 'pending';
+    panel.hidden = false;
+    submitBtn.disabled = true;
+    setStatus('恢復進行中的任務：' + _saved.jobId);
+    render();
+    attachSSE(_saved.jobId);
+  }
 })();
