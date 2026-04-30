@@ -24,31 +24,46 @@ case ":$PATH:" in
 esac
 
 # ─── 確保 yq ───
+# 偵測 OS（Linux / macOS / Windows Git Bash）並下載對應 binary。
+# Git Bash on Windows 跑 Linux ELF 會 "Exec format error"，所以要分平台。
 ensure_yq() {
+    local os_suffix arch_suffix bin_name="yq"
+    case "$(uname -s)" in
+        Linux)                os_suffix="linux" ;;
+        Darwin)               os_suffix="darwin" ;;
+        MINGW*|MSYS*|CYGWIN*) os_suffix="windows"; bin_name="yq.exe" ;;
+        *) echo "❌ 不支援的 OS：$(uname -s)" >&2; return 1 ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64)  arch_suffix="amd64" ;;
+        aarch64|arm64) arch_suffix="arm64" ;;
+        *) echo "❌ 不支援的架構：$(uname -m)" >&2; return 1 ;;
+    esac
+
+    # 清掉前一次跑錯平台留下的 binary（例如 Windows 環境裡的 Linux ELF yq）
+    if [ "$os_suffix" = "windows" ] && [ -f "$PIPELINE_BIN/yq" ]; then
+        rm -f "$PIPELINE_BIN/yq"
+    fi
+
     if command -v yq >/dev/null 2>&1; then
         return 0
     fi
-    local arch_suffix
-    case "$(uname -m)" in
-        x86_64|amd64) arch_suffix="linux_amd64" ;;
-        aarch64|arm64) arch_suffix="linux_arm64" ;;
-        *) echo "❌ 不支援的架構：$(uname -m)" >&2; return 1 ;;
-    esac
-    echo "↓ 首次執行，下載 yq 到 $PIPELINE_BIN/yq …" >&2
+
+    local url="https://github.com/mikefarah/yq/releases/latest/download/yq_${os_suffix}_${arch_suffix}"
+    [ "$os_suffix" = "windows" ] && url="${url}.exe"
+    local target="$PIPELINE_BIN/$bin_name"
+
+    echo "↓ 首次執行，下載 yq 到 $target …" >&2
     if command -v wget >/dev/null 2>&1; then
-        wget -qO "$PIPELINE_BIN/yq" \
-            "https://github.com/mikefarah/yq/releases/latest/download/yq_${arch_suffix}" \
-            || { echo "❌ yq 下載失敗" >&2; return 1; }
+        wget -qO "$target" "$url" || { echo "❌ yq 下載失敗" >&2; return 1; }
     elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$PIPELINE_BIN/yq" \
-            "https://github.com/mikefarah/yq/releases/latest/download/yq_${arch_suffix}" \
-            || { echo "❌ yq 下載失敗" >&2; return 1; }
+        curl -fsSL -o "$target" "$url" || { echo "❌ yq 下載失敗" >&2; return 1; }
     else
         echo "❌ 系統缺少 wget/curl，無法自動下載 yq" >&2
         return 1
     fi
-    chmod +x "$PIPELINE_BIN/yq"
-    echo "✓ yq 已就位（$($PIPELINE_BIN/yq --version)）" >&2
+    chmod +x "$target"
+    echo "✓ yq 已就位（$("$target" --version)）" >&2
 }
 
 # ─── node 包裝：本機有就直接跑，沒有就走 docker ───
@@ -66,9 +81,20 @@ node_run() {
     local script="$1"
     shift
     local script_in_container="${script#$ROOT/}"
+    # 若 REPORTS_DIR 在 ROOT 底下，把宿主路徑翻譯成容器路徑
+    local docker_reports_dir=""
+    if [ -n "${REPORTS_DIR:-}" ]; then
+        local rel="${REPORTS_DIR#$ROOT/}"
+        if [ "$rel" != "$REPORTS_DIR" ]; then
+            docker_reports_dir="/workspace/$rel"
+        else
+            docker_reports_dir="$REPORTS_DIR"
+        fi
+    fi
     docker run --rm -i \
         -v "$ROOT:/workspace" \
         -w /workspace \
+        ${docker_reports_dir:+-e REPORTS_DIR="$docker_reports_dir"} \
         node:22-slim \
         node "$script_in_container" "$@"
 }

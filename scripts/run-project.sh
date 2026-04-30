@@ -393,21 +393,23 @@ run_monkey() {
     # 清舊報告
     rm -f "$REPORTS_RAW/monkey-report.json" 2>/dev/null || true
     rm -rf "$REPORTS_RAW/monkey-html" 2>/dev/null || true
+    # 只 mount 原始碼，不 mount node_modules（Windows 路徑的 binary 在 Linux container 無法執行）
+    # container 在 /work 裡自行安裝乾淨的 Linux 版套件
     docker run --rm "${env_args[@]}" \
         -e TARGET_URL="$TARGET_URL" \
         -e MONKEY_PAGES="$pages" \
         -e MONKEY_ATTACKS="$attacks" \
         -e MONKEY_DELAY_MS="$delay" \
-        -v "$ROOT/tests/monkey:/monkey" \
+        -v "$ROOT/tests/monkey/tests:/work/tests:ro" \
+        -v "$ROOT/tests/monkey/playwright.config.ts:/work/playwright.config.ts:ro" \
+        -v "$ROOT/tests/monkey/package.json:/work/package.json:ro" \
+        -v "$ROOT/tests/monkey/package-lock.json:/work/package-lock.json:ro" \
         -v "$REPORTS_RAW:/reports" \
-        -w /monkey \
+        -w /work \
         mcr.microsoft.com/playwright:v1.59.1-noble \
         sh -c '
-            if [ -f package-lock.json ]; then
-                npm ci --no-audit --no-fund
-            else
-                npm install --no-audit --no-fund
-            fi && \
+            npm ci --no-audit --no-fund && \
+            npx playwright install chromium --with-deps && \
             npx playwright test
         ' \
         || echo "  (monkey 結束碼 $?)"

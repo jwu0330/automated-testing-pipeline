@@ -179,6 +179,23 @@ bash scripts/run-project.sh <name> ssl,e2e    # 多選
 
 完整 scope：`all | ssl | security | stress | static | e2e | api-test | nuclei | lighthouse | monkey | trivy | links | summary`
 
+### 情境 C：給外部使用者的一頁式網頁（無原始碼、URL-only）
+
+```bash
+node ui/server.js                # 預設 http://localhost:8080
+PORT=3000 node ui/server.js
+```
+
+特性：
+- 一頁式表單：填目標 URL → 勾要跑哪些測試 → 送出 → 即時看 log → 下載報告 zip
+- **單人鎖**：同時只允許一個任務執行（用檔案鎖 + PID 探活，掛掉會自動釋放）
+- **零儲存政策**：報告不入庫；下載完即刪 / 寄信完即刪
+- **可選寄信**：填了 email 會把 `report.md` 摘要寄到該信箱（需要設 `SMTP_URL` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` 環境變數，例如 Gmail App Password 用 `smtps://smtp.gmail.com:465`；未設定則跳過）
+- **可選測試**：因為外部使用者沒有 local_path，僅開放 URL-based 項目（ssl / security / nuclei / lighthouse / links / stress / monkey / api-test）；api-test 需上傳 OpenAPI 檔
+- **零 npm 依賴**：純 Node 標準函式庫；寄信走 `curl` 系統指令
+
+注意：CLI / Skills 路徑（情境 A、B）仍會把報告寫入 `<project>/.testing/reports/`，不受 UI 影響。
+
 ---
 
 ## 文件
@@ -190,7 +207,6 @@ bash scripts/run-project.sh <name> ssl,e2e    # 多選
 - [docs/run-tests.md](./docs/run-tests.md) — 操作手冊
 - [docs/architecture-parallel-reporting.md](./docs/architecture-parallel-reporting.md) — 三路並行設計、報告安全驗證
 - [docs/setup.md](./docs/setup.md) — WSL/Docker 安裝
-- [n8n/workflows/README.md](./n8n/workflows/README.md) — **[已棄用]** n8n GUI 流程，僅作參考保留
 
 ---
 
@@ -199,7 +215,6 @@ bash scripts/run-project.sh <name> ssl,e2e    # 多選
 - **報告位置**：v0.6 起報告寫進 `<project>/.testing/reports/`（pipeline repo 不再儲存其他專案的測試結果）。Quick-test 模式寫進 `<pipeline>/<name>/.testing/reports/`，folder 本地 gitignore。
 - **報告輪替**：`run-project.sh` 每次開跑前呼叫 `rotate-reports.sh`，把超過 `REPORTS_KEEP_DAYS`（預設 30）天的報告打包進 `archive/YYYY-MM.tar.gz`，archive 超過 365 天自動刪。關閉：`REPORTS_NO_ROTATE=1`。
 - **中文路徑風險**：`projects.registry.yml` 裡若路徑含中文（例 `/mnt/e/cwe網站/...`），在 docker volume mount 跨 WSL ↔ Windows 偶爾出問題。建議客戶專案放純英數路徑，或在 WSL 內 `mklink` 別名。
-- **n8n 已棄用**：保留 `n8n/` 目錄與 docker-compose service 作為參考，但不再主推。CLI / Claude Code Skills 是現在的主要介面。
 
 ---
 

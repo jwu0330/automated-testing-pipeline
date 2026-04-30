@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Automated Testing Pipeline</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <h1>Automated Testing Pipeline</h1>
+  <p class="lead">填好下方表單，送出後系統會對目標 URL 執行所選測試項目。每次只允許一個任務同時執行。</p>
+
+  <div class="notice">
+    <strong>資料保留政策：</strong>透過此網頁觸發的測試結果<u>不會儲存於此網站</u>，僅暫存供您下載。
+    下載完成後檔案會立即刪除；若您填寫 Email，系統會把報告摘要寄到您信箱後再刪除。
+  </div>
+
+  <form id="run-form">
+    <label>
+      <span>目標 URL <em>必填</em></span>
+      <input type="url" name="target_url" placeholder="https://example.com" required>
+    </label>
+
+    <fieldset>
+      <legend>測試人員帳號（選填，最多 2 組；提供給 API / Auth 測試使用）</legend>
+      <div class="tester-row">
+        <input type="text" name="tester1_user" placeholder="帳號" value="admin001" autocomplete="off">
+        <input type="text" name="tester1_pass" placeholder="密碼" value="@admin001" autocomplete="off">
+      </div>
+      <div class="tester-row">
+        <input type="text" name="tester2_user" placeholder="帳號（選填）" autocomplete="off">
+        <input type="text" name="tester2_pass" placeholder="密碼（選填）" autocomplete="off">
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>要跑的測試項目</legend>
+      <label class="check"><input type="checkbox" name="scope" value="ssl" checked> SSL / TLS 掃描 (testssl.sh)</label>
+      <label class="check"><input type="checkbox" name="scope" value="security" checked> 漏洞掃描 (OWASP ZAP)</label>
+      <label class="check"><input type="checkbox" name="scope" value="nuclei" checked> 漏洞模板掃描 (Nuclei)</label>
+      <label class="check"><input type="checkbox" name="scope" value="lighthouse" checked> 效能 / 無障礙 (Lighthouse)</label>
+      <label class="check"><input type="checkbox" name="scope" value="links"> 死連結檢查 (Lychee)</label>
+      <label class="check"><input type="checkbox" name="scope" value="stress"> 負載測試 (k6)</label>
+      <label class="check"><input type="checkbox" name="scope" value="monkey"> Monkey 隨機點擊 (Gremlins)</label>
+      <label class="check"><input type="checkbox" name="scope" value="api-test"> API 測試（需上傳 OpenAPI）</label>
+    </fieldset>
+
+    <label>
+      <span>OpenAPI 檔（選填，僅 API 測試用 — yaml / yml / json）</span>
+      <input type="file" name="openapi" accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml">
+    </label>
+
+    <label>
+      <span>Email（選填 — 填了會把報告摘要寄到您信箱）</span>
+      <input type="email" name="email" placeholder="you@example.com">
+    </label>
+
+    <button type="submit" id="submit-btn">送出並開始測試</button>
+    <p id="status" class="status"></p>
+  </form>
+
+  <section id="run-panel" hidden>
+    <h2>執行紀錄</h2>
+    <pre id="log"></pre>
+    <a id="download" href="#" hidden download>⬇ 下載報告 (zip)</a>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
