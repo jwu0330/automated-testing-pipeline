@@ -118,7 +118,30 @@ if [ -n "$PROJECT_PATH" ] && [ -f "$PROJECT_PATH/.testing/.env" ]; then
     set +a
 fi
 
-export TARGET_URL PROJECT_NAME="$NAME"
+AUTH_AUTO_LOGIN_REQUIRED=0
+if [ -z "${LOGIN_REQUIRED:-}" ] && [ -n "${ADMIN_USERNAME:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; then
+    LOGIN_REQUIRED=true
+    AUTH_AUTO_LOGIN_REQUIRED=1
+fi
+LOGIN_REQUIRED_NORM="$(printf '%s' "${LOGIN_REQUIRED:-false}" | tr '[:upper:]' '[:lower:]')"
+if [ "$LOGIN_REQUIRED_NORM" != "true" ]; then
+    LOGIN_REQUIRED=false
+fi
+AUTH_HAS_CREDS=false
+if [ -n "${ADMIN_USERNAME:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; then
+    AUTH_HAS_CREDS=true
+fi
+AUTH_MODE="anonymous"
+if [ "$LOGIN_REQUIRED" = "true" ] && [ "$AUTH_HAS_CREDS" = "true" ]; then
+    AUTH_MODE="form"
+elif [ "$LOGIN_REQUIRED" = "true" ]; then
+    AUTH_MODE="missing-credentials"
+fi
+
+export TARGET_URL PROJECT_NAME="$NAME" LOGIN_REQUIRED AUTH_AUTO_LOGIN_REQUIRED AUTH_MODE AUTH_HAS_CREDS
+export TARGET_UI_URL="${TARGET_UI_URL:-}"
+export ADMIN_USERNAME="${ADMIN_USERNAME:-}"
+export ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 # 給 summarize.js 用：URL-only 模式下，static/trivy 結構上不可能有報告，
 # 摘要應整段省略，避免使用者誤以為「漏跑了」
 # 注意用 URL_ONLY（從 testing.yml 直接判定），不要用 LOCAL_MODE（會被 fallback 影響）
@@ -189,6 +212,20 @@ fi
 REPORTS_RAW="$REPORTS_DIR/raw"
 mkdir -p "$REPORTS_RAW"
 
+cat > "$REPORTS_RAW/auth-context.json" <<EOF
+{
+  "login_required": $([ "$LOGIN_REQUIRED" = "true" ] && echo true || echo false),
+  "has_credentials": $([ "$AUTH_HAS_CREDS" = "true" ] && echo true || echo false),
+  "auto_enabled_login_required": $([ "$AUTH_AUTO_LOGIN_REQUIRED" = "1" ] && echo true || echo false),
+  "login_mode": "$AUTH_MODE",
+  "requested_scope": "$SCOPE",
+  "notes": [
+    "E2E and Monkey are browser-based and can submit the login form.",
+    "Stress, ZAP, Nuclei, Lighthouse, Lychee, SSL, and precheck run URL/HTTP-level checks and do not reuse a browser login session."
+  ]
+}
+EOF
+
 
 # 給下游程式（compose volume 插值、summarize.js）使用的環境變數
 export REPORTS_DIR REPORTS_RAW
@@ -211,7 +248,7 @@ else
 fi
 echo "║  PHP：     $PHP_VERSION"
 echo "║  範圍：    $SCOPE"
-echo "║  Auth：    form login only（no captured-state replay）"
+echo "║  Auth：    $AUTH_MODE (LOGIN_REQUIRED=$LOGIN_REQUIRED, creds=$AUTH_HAS_CREDS, no captured-state replay)"
 echo "║  E2E 巡檢：max_depth=$CRAWL_MAX_DEPTH max_pages=$CRAWL_MAX_PAGES enabled=$CRAWL_ENABLED"
 echo "║  報告：    $REPORTS_DIR/"
 echo "╚══════════════════════════════════════════════════╝"
@@ -414,6 +451,13 @@ run_e2e() {
     echo "──────────────────────────────────────────"
     local env_args=()
     [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+    local auth_env=(
+        -e LOGIN_REQUIRED="$LOGIN_REQUIRED"
+        -e TARGET_UI_URL="$TARGET_UI_URL"
+        -e ADMIN_USERNAME
+        -e ADMIN_PASSWORD
+        -e LOGIN_STATUS_PATH=/reports/login-status.json
+    )
 
     # 2026-04-30 起不再掛載 captured browser state。
     # E2E 巡檢需要的 crawl 設定，從 host env 透傳到 container
@@ -427,7 +471,7 @@ run_e2e() {
 
     if $LOCAL_MODE && [ -f "$PROJECT_PATH/.testing/e2e/package.json" ]; then
         # ① 本地模式：跑專案自備 spec
-        docker run --rm "${env_args[@]}" "${crawl_env[@]}" \
+        docker run --rm "${env_args[@]}" "${auth_env[@]}" "${crawl_env[@]}" \
             -e TARGET_URL="$TARGET_URL" \
             -v "$PROJECT_PATH/.testing/e2e:/work" \
             -v "$REPORTS_RAW:/reports" \
@@ -445,7 +489,7 @@ run_e2e() {
     else
         # ② URL-only 模式：跑 pipeline 自帶的泛用 spec（含 crawl）
         echo "  ℹ️  URL-only 模式 → 使用 pipeline 內建泛用 E2E（smoke + 安全標頭 + 全頁巡檢）"
-        docker run --rm "${env_args[@]}" "${crawl_env[@]}" \
+        docker run --rm "${env_args[@]}" "${auth_env[@]}" "${crawl_env[@]}" \
             -e TARGET_URL="$TARGET_URL" \
             -v "$ROOT/tests/e2e:/work" \
             -v "$ROOT/tests/_shared:/work/_shared:ro" \
@@ -519,12 +563,19 @@ run_monkey() {
     delay=$(yq -r '.tests.monkey.delay_ms // 10' "$TESTING_YML")
     local env_args=()
     [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+    local auth_env=(
+        -e LOGIN_REQUIRED="$LOGIN_REQUIRED"
+        -e TARGET_UI_URL="$TARGET_UI_URL"
+        -e ADMIN_USERNAME
+        -e ADMIN_PASSWORD
+        -e LOGIN_STATUS_PATH=/reports/login-status.json
+    )
     # 清舊報告
     rm -f "$REPORTS_RAW/monkey-report.json" 2>/dev/null || true
     rm -rf "$REPORTS_RAW/monkey-html" 2>/dev/null || true
     # 只 mount 原始碼，不 mount node_modules（Windows 路徑的 binary 在 Linux container 無法執行）
     # container 在 /work 裡自行安裝乾淨的 Linux 版套件
-    docker run --rm "${env_args[@]}" \
+    docker run --rm "${env_args[@]}" "${auth_env[@]}" \
         -e TARGET_URL="$TARGET_URL" \
         -e MONKEY_PAGES="$pages" \
         -e MONKEY_ATTACKS="$attacks" \

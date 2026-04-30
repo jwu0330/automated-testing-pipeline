@@ -125,18 +125,24 @@ export async function loginIfPossible(
   await pwField.fill(pass);
 
   const beforeUrl = page.url();
-  const submit = page.locator('button[type=submit], input[type=submit], button:has-text("登入"), button:has-text("Login"), button:has-text("Sign in")').first();
+  const submit = page.locator('button[type=submit], input[type=submit], button:has-text("登入"), button:has-text("Login"), button:has-text("Log in"), button:has-text("Sign in"), button:has-text("Submit")').first();
   const settled = page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
   if (await submit.count()) {
     await submit.click().catch((e: any) => actions.push(`submit click failed: ${e.message}`));
   } else {
-    await pwField.press('Enter').catch((e: any) => actions.push(`Enter submit failed: ${e.message}`));
+    const buttons = page.locator('button:not([disabled])');
+    if ((await buttons.count()) === 1) {
+      await buttons.first().click().catch((e: any) => actions.push(`single button click failed: ${e.message}`));
+    } else {
+      await pwField.press('Enter').catch((e: any) => actions.push(`Enter submit failed: ${e.message}`));
+    }
   }
   await settled;
+  await page.waitForTimeout(500);
 
-  const stillHasPw = (await page.locator('input[type=password]').count()) > 0;
+  const stillHasPw = (await page.locator('input[type=password]:visible').count()) > 0;
   const urlChanged = page.url() !== beforeUrl;
-  const success = urlChanged && !stillHasPw;
+  const success = !stillHasPw;
   actions.push(`After submit: urlChanged=${urlChanged}, stillHasPassword=${stillHasPw}`);
 
   return finalize({

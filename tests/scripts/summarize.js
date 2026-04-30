@@ -524,6 +524,28 @@ if (!crawl.status) {
   L.push('');
 }
 
+if (authCtx) {
+  L.push('## Scope Coverage / Auth');
+  L.push('');
+  L.push(`- Login mode: **${authCtx.login_mode || 'unknown'}** (LOGIN_REQUIRED=${authCtx.login_required ? 'true' : 'false'}, credentials=${authCtx.has_credentials ? 'present' : 'missing'})`);
+  if (authCtx.auto_enabled_login_required) {
+    L.push('- LOGIN_REQUIRED was auto-enabled because credentials were provided.');
+  }
+  L.push('- Browser-authenticated scopes: `e2e`, `monkey` use form login when mode is `form`.');
+  L.push('- Anonymous URL/HTTP scopes: `stress`, `security`/ZAP, `nuclei`, `lighthouse`, `links`, `ssl`, `precheck` do not reuse browser login state.');
+  L.push('- `api-test` / `auth-test` can use credentials only through API collections; they are separate from browser login.');
+  L.push('');
+  L.push('| Scope | Auth behavior | What it means |');
+  L.push('|------|------|------|');
+  L.push('| `e2e` | form login when enabled | Smoke checks plus crawl can start after login. |');
+  L.push('| `monkey` | form login when enabled | UI interaction fuzzing can run on a logged-in browser page. |');
+  L.push('| `stress` | anonymous HTTP by default | Load test hits configured HTTP journeys, not logged-in browser flows. |');
+  L.push('| `security` / `nuclei` | anonymous scan | Finds public-surface issues unless a tool-specific auth flow is configured later. |');
+  L.push('| `lighthouse` / `links` | anonymous page load | Measures/checks reachable public URLs only. |');
+  L.push('| `ssl` / `precheck` | no app login | TLS and basic reachability only. |');
+  L.push('');
+}
+
 // ─── 摘要 ────────────────────────────────────────────────
 L.push('## 摘要');
 L.push('');
