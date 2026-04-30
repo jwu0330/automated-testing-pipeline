@@ -155,6 +155,42 @@ function tarReports(reportDir, archivePath) {
   });
 }
 
+// Windows 沒有原生 zip，必須走 WSL（跟 server.js 跑 tar 同一個模式）
+const winToWsl = (p) => {
+  const m = String(p).match(/^([A-Za-z]):[\\\/]?(.*)$/);
+  if (!m) return String(p).replace(/\\/g, '/');
+  return `/mnt/${m[1].toLowerCase()}/` + m[2].replace(/\\/g, '/');
+};
+
+// 把 sourceFile 包進密碼保護 zip。Gmail 的病毒掃描無法解開加密 zip 內容，
+// 加密後就會放行（避免 ZAP / Nuclei / Trivy 的 payload 觸發誤判）。
+// 用系統的 `zip` 指令（Windows 走 WSL）；不存在時回 false，讓 caller fallback。
+function passwordZip(sourceFile, zipPath, password) {
+  return new Promise((resolve) => {
+    const isWin = process.platform === 'win32';
+    const safePw = password.replace(/'/g, "'\\''");
+    let cmd, args;
+    if (isWin) {
+      const srcWsl = winToWsl(sourceFile);
+      const dstWsl = winToWsl(zipPath);
+      // -j 不保留路徑、-P 設密碼、-q 安靜模式
+      cmd = 'wsl';
+      args = ['-e', 'bash', '-lc', `zip -j -q -P '${safePw}' '${dstWsl}' '${srcWsl}'`];
+    } else {
+      cmd = 'zip';
+      args = ['-j', '-q', '-P', password, zipPath, sourceFile];
+    }
+    const z = spawn(cmd, args);
+    let err = '';
+    z.stderr && z.stderr.on('data', d => err += d.toString());
+    z.on('error', (e) => resolve({ ok: false, error: `zip 啟動失敗：${e.message}` }));
+    z.on('close', (code) => {
+      if (code === 0 && fs.existsSync(zipPath)) resolve({ ok: true });
+      else resolve({ ok: false, error: err.trim() || `zip exit=${code}` });
+    });
+  });
+}
+
 async function sendReportEmail({ to, reportDir, targetUrl, scope, exitCode, jobId, archivePath }) {
   if (!to) return { ok: false, skipped: true, reason: 'no recipient' };
 
@@ -189,9 +225,30 @@ async function sendReportEmail({ to, reportDir, targetUrl, scope, exitCode, jobI
     if (!ok) archive = null;
     else archiveCreatedHere = true;
   }
-  const attachments = (archive && fs.existsSync(archive))
-    ? [{ filename: `reports-${jobId || 'pipeline'}.tgz`, path: archive, contentType: 'application/gzip' }]
-    : [];
+
+  // Gmail 會掃 .tgz 內容，看到 ZAP / Nuclei / Trivy 的 payload 會擋成「含病毒」。
+  // 對策：把 .tgz 再包一層 password-zip，加密後 Gmail 無法掃內容就會放行。
+  // 密碼放信件本文，使用者直接看得到。zip 不存在就 fallback 寄原 .tgz。
+  let attachments = [];
+  let zipNotice = '';
+  let zipPath = null;
+  let zipCreatedHere = false;
+  if (archive && fs.existsSync(archive)) {
+    const password = (jobId || crypto.randomBytes(4).toString('hex')).replace(/[^a-zA-Z0-9-]/g, '').slice(-12) || 'atp-reports';
+    const wrapName = `reports-${jobId || 'pipeline'}.zip`;
+    zipPath = path.join(os.tmpdir(), wrapName);
+    const r = await passwordZip(archive, zipPath, password);
+    if (r.ok) {
+      zipCreatedHere = true;
+      attachments = [{ filename: wrapName, path: zipPath, contentType: 'application/zip' }];
+      zipNotice = `\n\n─── 附件說明 ───\n附件 ${wrapName} 為 password-zip（避免 Gmail 誤判封鎖內含 ZAP / Nuclei payload）。\n解壓密碼：${password}\n解開後得 reports.tgz；再 tar -xzf reports.tgz 取出 reports/。`;
+    } else {
+      // zip 不存在 → fallback 直接附 .tgz（可能會被 Gmail 擋）
+      attachments = [{ filename: `reports-${jobId || 'pipeline'}.tgz`, path: archive, contentType: 'application/gzip' }];
+      zipNotice = `\n\n─── 附件說明 ───\n注意：本機沒有 zip 指令（${r.error}），改附原始 .tgz；若 Gmail 擋下請從 UI 「下載報告」按鈕取得。`;
+    }
+  }
+  body += zipNotice;
 
   const host = (() => { try { return new URL(targetUrl).hostname; } catch { return targetUrl || 'pipeline'; } })();
   const subject = `[ATP] 測試完成 - ${host}` + (typeof exitCode === 'number' ? ` (exit=${exitCode})` : '');
@@ -199,6 +256,7 @@ async function sendReportEmail({ to, reportDir, targetUrl, scope, exitCode, jobI
   const result = await sendEmail({ to, subject, body, attachments });
 
   if (archiveCreatedHere) { try { fs.unlinkSync(archive); } catch {} }
+  if (zipCreatedHere && zipPath) { try { fs.unlinkSync(zipPath); } catch {} }
   return result;
 }
 

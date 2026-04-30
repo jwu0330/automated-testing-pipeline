@@ -144,6 +144,48 @@ const lockAlive = (l) => {
 };
 const clearLock = () => { try { fs.unlinkSync(LOCK); } catch {} };
 
+// ─── Active job 追蹤（為了支援 /api/cancel）─────────────────
+// 每個 jobId 對應 { activeChild, projectName, cancelled }；activeChild 在 register / run / tar 三階段切換。
+// 取消時：kill 當前 child（process tree）+ kill 屬於這專案的 docker 容器。
+// child.on('close') 自然會跑既有 finish() 邏輯，更新 status.json + 清 lock。
+const activeJobs = new Map();
+
+// 標準測試容器名（pipeline 各 stage 固定容器名）；取消時批次 kill
+const TEST_CONTAINER_NAMES = [
+  'testssl-runner', 'zap-scanner', 'nuclei-scanner', 'lighthouse-runner',
+  'lychee-runner', 'k6-runner', 'playwright-runner', 'monkey-runner',
+  'newman-runner', 'trivy-fs-runner',
+];
+
+function killProcessTree(child) {
+  if (!child || !child.pid) return;
+  try {
+    if (IS_WIN) {
+      // wsl.exe 的子孫不會收到 Windows signal；用 taskkill /T 殺整棵 windows-side process tree
+      spawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], { stdio: 'ignore' });
+    } else {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+    }
+  } catch {}
+}
+
+function killTestContainers(writeLog) {
+  // WSL pkill：把 WSL 裡可能仍在跑的 bash script (run-project.sh / register-project.sh) 殺乾淨
+  // 加上 docker kill：被 docker compose run 起來的測試容器，wsl 端 script 死了 docker daemon 還會留容器
+  const cmd = [
+    "pkill -KILL -f 'tests/scripts/run-project.sh' 2>/dev/null || true",
+    "pkill -KILL -f 'tests/scripts/register-project.sh' 2>/dev/null || true",
+    `names="${TEST_CONTAINER_NAMES.join(' ')}"`,
+    'for n in $names; do docker kill "$n" 2>/dev/null || true; done',
+  ].join('; ');
+  const proc = IS_WIN
+    ? spawn('wsl', ['-e', 'bash', '-lc', cmd], { stdio: 'ignore' })
+    : spawn('bash', ['-lc', cmd], { stdio: 'ignore' });
+  if (writeLog) {
+    proc.on('close', (code) => writeLog(`[ui] kill containers exit=${code}\n`));
+  }
+}
+
 // ─── 極簡 multipart/form-data 解析（單檔、扁平欄位）─────────
 async function parseMultipart(req) {
   const ct = req.headers['content-type'] || '';
@@ -268,13 +310,17 @@ function createJob({ targetUrl, targetUiUrl, scopes, openapi, storageStateText, 
     fs.writeFileSync(openapiPath, openapi.data);
   }
 
-  // 寫入 storage-state.json（session）— 接受兩種格式並自動轉換成 Playwright storageState：
-  //   ① Playwright storageState：{"cookies":[...],"origins":[...]}
-  //   ② Cookie-Editor 匯出陣列：[{"name":"...","value":"...","domain":"...",...}, ...]
-  // run_e2e / run_monkey 會偵測 .testing/storage-state.json，自動 mount + 設 STORAGE_STATE_PATH
+  // 2026-04-30：session 流程已預設停用——run-project.sh 不再讀 storage-state.json，
+  // 即使這裡寫了也不生效。保留邏輯純粹為了「未來若 LOGIN_REQUIRED 流程恢復」時能直接接回；
+  // 目前在隱藏的 input 上設預設空字串，永遠進不來這個分支。
   if (storageStateText && storageStateText.trim().length > 0) {
-    const normalized = normalizeStorageState(storageStateText);
-    fs.writeFileSync(path.join(testingDir, 'storage-state.json'), JSON.stringify(normalized));
+    try {
+      const normalized = normalizeStorageState(storageStateText);
+      fs.writeFileSync(path.join(testingDir, 'storage-state.json'), JSON.stringify(normalized));
+    } catch (e) {
+      // 解析失敗不擋流程；session 已停用，這個檔最後也不會被讀
+      console.warn('[server] storage-state 解析失敗（已停用流程，忽略）：', e.message);
+    }
   }
   const projectName = safeName(host) + '-' + jobId.slice(0, 10).replace(/[^\w-]/g, '');
   const yml =
@@ -316,19 +362,26 @@ tests: {}
 
   writeLog(`[ui] job ${jobId}\n[ui] target=${targetUrl}\n[ui] scopes=${scopeArg}\n[ui] project=${projectName}\n[ui] project_path=${projectPathBash}\n[ui] email=${email || '(none)'}\n[ui] testers=${testers.filter(t => t.user).map(t => t.user).join(',') || '(none)'}\n\n`);
 
+  // 註冊到 activeJobs（讓 /api/cancel 能找到 child）
+  activeJobs.set(jobId, { activeChild: null, projectName, cancelled: false });
+  const setActiveChild = (c) => { const j = activeJobs.get(jobId); if (j) j.activeChild = c; };
+
   const finish = (exitCode, archiveName) => {
     try { fs.closeSync(logFd); } catch {}
+    const cancelled = !!(activeJobs.get(jobId) || {}).cancelled;
     fs.writeFileSync(statusFile, JSON.stringify({
       state: 'done',
       job_id: jobId,
       project_name: projectName,
-      exit_code: exitCode,
+      exit_code: cancelled ? -1 : exitCode,
+      cancelled,
       archive: archiveName || null,
       ended: Date.now(),
     }));
     // 清 .tmp-reports/<projectName>：資料已經 copy 進 jobDir，原處不再保留
     try { fs.rmSync(path.join(ROOT, '.tmp-reports', projectName), { recursive: true, force: true }); } catch {}
     clearLock();
+    activeJobs.delete(jobId);
   };
 
   // ① 先確保 Docker 就緒，再 register
@@ -336,6 +389,7 @@ tests: {}
   const reg = spawnBash(path.join(ROOT, 'tests', 'scripts', 'register-project.sh'), [projectName, projectPathBash], {
     cwd: ROOT, env: process.env,
   });
+  setActiveChild(reg);
   reg.stdout.on('data', d => writeLog(d.toString()));
   reg.stderr.on('data', d => writeLog(d.toString()));
   reg.on('error', (e) => { writeLog(`[ui] register spawn error: ${e.message}\n`); finish(127, null); });
@@ -348,6 +402,7 @@ tests: {}
     const child = spawnBash(path.join(ROOT, 'tests', 'scripts', 'run-project.sh'), [projectName, scopeArg], {
       cwd: ROOT, env: process.env,
     });
+    setActiveChild(child);
     child.stdout.on('data', d => writeLog(d.toString()));
     child.stderr.on('data', d => writeLog(d.toString()));
     child.on('error', (e) => { writeLog(`[ui] run spawn error: ${e.message}\n`); finish(127, null); });
@@ -488,12 +543,16 @@ const server = http.createServer(async (req, res) => {
       try { payload = JSON.parse(body || '{}'); }
       catch { sendJSON(res, 400, { error: 'JSON 解析失敗' }); return; }
       const loginUrl = String(payload.loginUrl || '').trim();
+      const username = String(payload.username || '').trim();
+      const password = String(payload.password || '');
 
       const tmpFile = path.join(os.tmpdir(), `atp-storage-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.json`);
       const r = await captureSession({
         loginUrl,
         outputPath: tmpFile,
         uiCwd: UI_DIR,
+        username: username || undefined,
+        password: password || undefined,
       });
       // UI 流程：把 storageState 直接回給前端（前端會 JSON.stringify 進 textarea），
       // 暫存檔不再保留
@@ -533,6 +592,22 @@ const server = http.createServer(async (req, res) => {
         sendJSON(res, 500, { ok: false, reason: '預先登入流程例外：' + e.message });
       }
     });
+    return;
+  }
+
+  // POST /api/cancel/:job_id — 取消跑中任務
+  // 流程：kill activeChild process tree（taskkill /T /F on Windows）+ pkill bash script + docker kill 測試容器
+  // 殺完之後 child 的 on('close') 會自然觸發既有 finish() 邏輯（標 cancelled=true、清 lock）
+  const cancelM = pathname.match(/^\/api\/cancel\/([\w.\-]+)$/);
+  if (req.method === 'POST' && cancelM) {
+    const jobId = cancelM[1];
+    const entry = activeJobs.get(jobId);
+    if (!entry) { sendJSON(res, 404, { ok: false, error: '任務不存在或已結束' }); return; }
+    if (entry.cancelled) { sendJSON(res, 200, { ok: true, alreadyCancelled: true }); return; }
+    entry.cancelled = true;
+    killProcessTree(entry.activeChild);
+    killTestContainers();
+    sendJSON(res, 200, { ok: true, jobId, projectName: entry.projectName });
     return;
   }
 
@@ -580,6 +655,7 @@ const server = http.createServer(async (req, res) => {
           closed = true;
           sendEvent('done', JSON.stringify({
             exit_code: status.exit_code,
+            cancelled: !!status.cancelled,
             download_url: status.archive ? `/api/download/${jobId}` : null,
           }));
           res.end();

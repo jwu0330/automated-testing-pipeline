@@ -6,6 +6,7 @@
   const summaryEl = document.getElementById('progress-summary');
   const listEl = document.getElementById('progress-list');
   const dlBtn = document.getElementById('download-btn');
+  const cancelBtn = document.getElementById('cancel-btn');
 
   // ─── scope key → 中文顯示名 ───
   const SCOPE_LABELS = {
@@ -44,6 +45,7 @@
   let downloadUrl = null;
   let activeES = null;
   let currentRunning = null;
+  let activeJobId = null;
 
   // ─── 活躍任務記憶（重整網頁時可恢復跑中狀態）───
   const SAVE_KEY = 'atp.activeJob';
@@ -87,6 +89,10 @@
   const attachSSE = (jobId) => {
     if (activeES) { try { activeES.close(); } catch {} }
     currentRunning = null;
+    activeJobId = jobId;
+    cancelBtn.hidden = false;
+    cancelBtn.disabled = false;
+    cancelBtn.textContent = '✋ 取消測試';
     const es = new EventSource('/api/logs/' + jobId);
     activeES = es;
 
@@ -109,15 +115,18 @@
       const info = JSON.parse(ev.data);
       es.close();
       activeES = null;
+      activeJobId = null;
+      cancelBtn.hidden = true;
       submitBtn.disabled = false;
       for (const s of scopes) {
         if (states[s] === 'pending' || states[s] === 'running') {
-          states[s] = info.exit_code === 0 ? 'done' : 'failed';
+          states[s] = info.cancelled ? 'failed' : (info.exit_code === 0 ? 'done' : 'failed');
         }
       }
       render();
-      if (info.exit_code === 0) setStatus('完成 ✅', 'ok');
-      else setStatus('結束碼 ' + info.exit_code + '（部分測試可能失敗，仍可下載報告）', 'error');
+      if (info.cancelled)             setStatus('已取消（仍可下載部分報告）', 'error');
+      else if (info.exit_code === 0)  setStatus('完成 ✅', 'ok');
+      else                            setStatus('結束碼 ' + info.exit_code + '（部分測試可能失敗，仍可下載報告）', 'error');
 
       if (info.download_url) {
         downloadUrl = info.download_url;
@@ -136,6 +145,8 @@
       if (es.readyState === EventSource.CLOSED) {
         try { es.close(); } catch {}
         activeES = null;
+        activeJobId = null;
+        cancelBtn.hidden = true;
         submitBtn.disabled = false;
         clearJob();
         // 若整盤都還是 pending（=「重整恢復」但伺服器其實沒這 job），收掉面板
@@ -150,6 +161,29 @@
       }
     });
   };
+
+  // ─── 取消按鈕 ───
+  cancelBtn.addEventListener('click', async () => {
+    if (!activeJobId || cancelBtn.disabled) return;
+    if (!confirm('確定取消這個測試？已跑完的階段仍會保留在報告裡。')) return;
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = '取消中…';
+    try {
+      const r = await fetch('/api/cancel/' + activeJobId, { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setStatus('取消失敗：' + (data.error || ('HTTP ' + r.status)), 'error');
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = '✋ 取消測試';
+      } else {
+        setStatus('已送出取消，等待 server 收尾…');
+      }
+    } catch (e) {
+      setStatus('取消失敗：' + e.message, 'error');
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = '✋ 取消測試';
+    }
+  });
 
   // ─── 表單送出 ───
   form.addEventListener('submit', async (e) => {
@@ -197,45 +231,9 @@
     window.location.href = downloadUrl;
   });
 
-  // ─── 路徑 A：🪟 跳出 Playwright 視窗手動登入 ───
-  const browserBtn  = document.getElementById('prelogin-browser-btn');
-  const browserStat = document.getElementById('prelogin-browser-status');
-  if (browserBtn) {
-    browserBtn.addEventListener('click', async () => {
-      const setStat = (msg, cls = '') => {
-        browserStat.textContent = msg;
-        browserStat.className = 'status' + (cls ? ' ' + cls : '');
-      };
-      const fd = new FormData(form);
-      const loginUrl = (fd.get('target_url') || '').trim();
-      if (!loginUrl) { setStat('請先填上方「目標 URL」', 'error'); return; }
-
-      browserBtn.disabled = true;
-      setStat('🪟 已要求後端跳出瀏覽器視窗 — 請在跳出的視窗手動登入，登入完成後關閉視窗（最長 5 分鐘）');
-      try {
-        const res = await fetch('/api/prelogin-browser', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ loginUrl }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.ok) {
-          let msg = '✗ 失敗：' + (data.reason || ('HTTP ' + res.status));
-          if (data.hint) msg += '\n💡 ' + data.hint;
-          if (data.stderr) msg += '\nstderr: ' + data.stderr;
-          setStat(msg, 'error');
-          return;
-        }
-        const storageTaEl = document.getElementById('storage_state_text');
-        storageTaEl.value = JSON.stringify(data.storageState);
-        setStat(`✓ ${data.reason}（已自動填入下方 Session 框）`, 'ok');
-      } catch (e) {
-        setStat('✗ 連線失敗：' + e.message, 'error');
-      } finally {
-        browserBtn.disabled = false;
-      }
-    });
-  }
+  // 2026-04-30：prelogin-browser 視覺元素已從 index.html 拿掉，session 流程廢棄。
+  // 保留 /api/prelogin-browser 後端 endpoint（dead code，未來若要恢復再接回）。
+  // 這裡曾經有 browserBtn click handler，連同所屬 DOM 一併移除。
 
   // ─── 頁面載入時：若 localStorage 有活躍任務 → 重建進度 UI + 重連 SSE ───
   // SSE endpoint 會從 log 檔起點重播，且 status=done 時直接送 done event；

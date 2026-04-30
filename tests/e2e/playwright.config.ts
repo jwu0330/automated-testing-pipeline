@@ -5,10 +5,12 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * 讀取環境變數：
  *   TARGET_URL    - 測試目標網址（預設 https://example.com）
- *   E2E_USERNAME  - 登入測試用帳號（選填）
- *   E2E_PASSWORD  - 登入測試用密碼（選填）
  *
  * 各專案應複製此檔到 <project>/.testing/e2e/ 並依需求覆寫。
+ *
+ * 2026-04-30：session 流程預設停用（目標站多數已關後端 auth）。
+ *   storageState 參數刻意不讀 STORAGE_STATE_PATH——pipeline 跑這支 spec 時
+ *   不再注入 cookies；要手動恢復 session 模式請自行覆寫。
  */
 export default defineConfig({
   testDir: './tests',
@@ -32,9 +34,6 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     ignoreHTTPSErrors: false,
-    // 若使用者上傳了 session（cookies + localStorage），Playwright 直接帶著進站 →
-    // 完全跳過登入頁，不會觸發 CAPTCHA / 2FA。沒提供時為 undefined（走 spec 內的表單登入）。
-    storageState: process.env.STORAGE_STATE_PATH || undefined,
   },
 
   projects: [

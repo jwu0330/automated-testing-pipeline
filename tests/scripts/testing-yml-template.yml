@@ -41,44 +41,73 @@ tests:
   api-test:
     openapi: local/doc/openapi.yaml
 
+# ─── 2026-04-30 起：認證流程預設停用 ───────────────────────────
+# 目標站多數已關後端 token 驗證，pipeline 不再做 session 擷取 / cookie 注入。
+# 想恢復登入流程的舊行為（極少數情況）：在 .testing/.env 設 LOGIN_REQUIRED=true，
+# 並補上 ADMIN_USERNAME / ADMIN_PASSWORD 或 storage-state.json。
+# 完整背景見 docs/auth-coverage-plan.md（保留為歷史紀錄）。
+# ────────────────────────────────────────────────────────────
+
+# ─── E2E 全頁巡檢（crawl）— 確認每個分頁都走得到 ──────────────
+# 從 target_url 出發 BFS 走訪所有同源 <a href> 連結；驗每頁回 < 400、
+# 不被踢回登入頁、無 JS 錯誤。對「auth 已關」的站，這就是「真的測到裡面」
+# 的核心訊號。
+#
 # tests:
-#   static:
-#     level: 7                           # 預設 5，要更嚴就填
-#     paths_to_scan: [public, includes]  # 預設自動偵測
-#
-#   stress:
-#     vus: 20                            # 預設 10（共享主機建議 ≤ 10）
-#     duration: 60s                      # 預設 30s
-#     pages: [/, /login.html, /api/health.php]
-#
-#   api-test:
-#     openapi: api/openapi.yaml          # 路徑可絕對 or 相對 local_path；不填則自動偵測 .testing/api/openapi.{yaml,yml,json}
-#     # enabled: false                   # 強制關閉
-#
 #   e2e:
-#     auth:
-#       enabled: true                    # 要登入才設；帳密放 .testing/.env
-#       username_env: E2E_USERNAME
-#       password_env: E2E_PASSWORD
+#     crawl:
+#       enabled: true                    # 預設 true；改 false 跳過
+#       max_depth: 2                     # BFS 深度上限
+#       max_pages: 50                    # 總頁數上限（保險閥；爬到上限就停）
+#       include_subdomains: false        # true 時 *.host 也算同源
+#       ignore_patterns:                 # path regex，符合就跳過
+#         - '^/logout'
+#         - '\.pdf$'                     # 用 single-quote 避免 YAML 對 \ 雙重轉義
+#         - '^/api/'                     # 純 API endpoint 通常不適合用瀏覽器導
 #
-#   nuclei:
-#     severity: "critical,high,medium"   # 預設；想加 low/info 就列出來
-#     rate_limit: 50                     # req/s，共享主機建議 ≤ 50
+# tests:
+#   stress:
+#     vus: 20
+#     duration: 60s
+#     # 兩種寫法擇一：
+#     # ① pages（簡單）：每個 path 一個 GET，全部丟進匿名 journey
+#     pages: [/, /login, /admin]
+#     # ② journeys（進階）：自己排步驟、weight 分流量比重
+#     # journeys:
+#     #   - name: anon_browse
+#     #     weight: 100
+#     #     auth: false                  # cookie 一律不帶（auth 已停用）
+#     #     steps:
+#     #       - GET /
+#     #       - GET /admin
+#     #       - "POST /api/foo {\"x\":1}"
 #
 #   lighthouse:
 #     preset: desktop                    # desktop | mobile
-#     pages: [/, /login.html]            # 預設 [/]
+#     # 字串陣列即可；物件 {path, auth} 也接受但 auth 已停用、永遠當 false
+#     pages: [/, /products, /admin/dashboard]
+#
+#   nuclei:
+#     severity: "critical,high,medium"
+#     rate_limit: 50                     # req/s，共享主機建議 ≤ 50
 #
 #   monkey:
-#     pages: [/, /login.html]            # 預設 [/]
-#     attacks: 500                       # 總攻擊次數
-#     delay_ms: 10                       # 每次間隔（總耗時 ≈ attacks * delay_ms）
+#     pages: [/, /admin]                 # 預設 [/]
+#     attacks: 500
+#     delay_ms: 10                       # 總耗時 ≈ attacks * delay_ms
+#
+#   static:
+#     level: 7                           # 預設 5，要更嚴就填
+#     paths_to_scan: [public, includes]
+#
+#   api-test:
+#     openapi: api/openapi.yaml
 #
 #   trivy:
-#     severity: "CRITICAL,HIGH,MEDIUM"   # 注意大寫
-#     scanners: "vuln,secret,misconfig"  # 可省略某項
+#     severity: "CRITICAL,HIGH,MEDIUM"
+#     scanners: "vuln,secret,misconfig"
 #
 #   links:
-#     max_depth: 1                       # 0=只檢查 target_url 本頁；1=向下一層
-#     timeout: 15                        # 單一連結逾時秒數
+#     max_depth: 1
+#     timeout: 15
 #     max_concurrency: 4

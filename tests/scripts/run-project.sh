@@ -46,6 +46,14 @@ REGISTRY="$ROOT/projects.registry.yml"
 # 自動補齊 yq（host 只需要 Docker）
 source "$ROOT/tests/scripts/lib/bootstrap.sh"
 
+# 檢查 host 是否有 node（影響部分 schema 規格化）
+# 缺了 node 不會壞 — 但 journeys / lighthouse 多頁等新特性會 fallback 到舊邏輯
+# summarize.js 一律 OK（node_run 會自動走 docker fallback）
+if ! command -v node >/dev/null 2>&1; then
+    echo "  ⚠️  host 找不到 node — 新 schema 特性（journeys / 多頁 lighthouse）會 fallback 到簡化版"
+    echo "     建議：sudo apt install -y nodejs（WSL）一次裝好"
+fi
+
 [ -f "$REGISTRY" ] || { echo "❌ 找不到 $REGISTRY，請先 register-project.sh"; exit 1; }
 
 # ─── 從 registry 找到 testing.yml ───
@@ -116,6 +124,70 @@ export TARGET_URL PROJECT_NAME="$NAME"
 # 注意用 URL_ONLY（從 testing.yml 直接判定），不要用 LOCAL_MODE（會被 fallback 影響）
 export LOCAL_MODE URL_ONLY
 
+# ─── Auth 預設關閉（2026-04-30 起）─────────────────────────────
+#
+# 目標站絕大多數已關後端 token 驗證、UI 是裝飾品；prelogin-browser /
+# capture-session / storage-state 全條路徑「保留 code、預設不呼叫」。
+# 這裡一律不解析 auth.* 設定；STORAGE_STATE_PATH 與 TARGET_COOKIE 一律空字串
+# export 出去，讓 docker-compose 的 ZAP/Lychee/Nuclei wrapper 在「無 cookie」
+# 分支跑（wrapper 內已有 [ -n "$TARGET_COOKIE" ] 判斷，自動 no-op）。
+#
+# k6 journey-based 與 Lighthouse 多頁仍生效——只是裡面 auth=true 的 journey/頁
+# 因為沒 cookie 也只會匿名打。這跟「目標站本來就無 auth」相符。
+# ─────────────────────────────────────────────────────────────────
+STORAGE_STATE_PATH=""
+TARGET_COOKIE=""
+export STORAGE_STATE_PATH TARGET_COOKIE
+
+# 1) JOURNEYS_JSON：給 k6 用（auth 全當 false，cookie 一律不帶）
+#    若 testing.yml 有 tests.stress.journeys → 直接用
+#    否則退化：把 tests.stress.pages 包成單一匿名 journey
+RAW_STRESS=$(yq -o=json -I=0 '.tests.stress // {}' "$TESTING_YML" 2>/dev/null || echo '{}')
+if command -v node >/dev/null 2>&1; then
+    JOURNEYS_JSON=$(node -e '
+      const s = JSON.parse(process.argv[1] || "{}");
+      if (Array.isArray(s.journeys) && s.journeys.length) {
+        process.stdout.write(JSON.stringify(s.journeys));
+      } else if (Array.isArray(s.pages) && s.pages.length) {
+        process.stdout.write(JSON.stringify([{
+          name: "anon", weight: 100, auth: false,
+          steps: s.pages.map(p => "GET " + p),
+        }]));
+      } else {
+        process.stdout.write("");
+      }
+    ' "$RAW_STRESS")
+else
+    JOURNEYS_JSON=""
+fi
+export JOURNEYS_JSON
+
+# 2) LIGHTHOUSE_PAGES_JSON：[{path, auth}] — 多頁時用
+RAW_LH_PAGES=$(yq -o=json -I=0 '.tests.lighthouse.pages // ["/"]' "$TESTING_YML" 2>/dev/null || echo '["/"]')
+if command -v node >/dev/null 2>&1; then
+    LIGHTHOUSE_PAGES_JSON=$(node -e '
+      const arr = JSON.parse(process.argv[1] || "[]");
+      const out = (Array.isArray(arr) ? arr : []).map(p =>
+        typeof p === "string"
+          ? { path: p, auth: false }
+          : { path: p.path || "/", auth: !!p.auth }
+      );
+      process.stdout.write(JSON.stringify(out));
+    ' "$RAW_LH_PAGES")
+else
+    LIGHTHOUSE_PAGES_JSON=""
+fi
+export LIGHTHOUSE_PAGES_JSON
+
+# 3) E2E 巡檢（crawl）參數：給 tests/e2e/tests/crawl.spec.ts 用
+#    讓使用者在 testing.yml 控制深度 / 頁數上限 / 忽略路徑
+CRAWL_MAX_DEPTH=$(yq -r '.tests.e2e.crawl.max_depth // 2' "$TESTING_YML" 2>/dev/null || echo "2")
+CRAWL_MAX_PAGES=$(yq -r '.tests.e2e.crawl.max_pages // 50' "$TESTING_YML" 2>/dev/null || echo "50")
+CRAWL_INCLUDE_SUBDOMAINS=$(yq -r '.tests.e2e.crawl.include_subdomains // false' "$TESTING_YML" 2>/dev/null || echo "false")
+CRAWL_IGNORE_PATTERNS=$(yq -o=json -I=0 '.tests.e2e.crawl.ignore_patterns // []' "$TESTING_YML" 2>/dev/null || echo "[]")
+CRAWL_ENABLED=$(yq -r '.tests.e2e.crawl.enabled // true' "$TESTING_YML" 2>/dev/null || echo "true")
+export CRAWL_MAX_DEPTH CRAWL_MAX_PAGES CRAWL_INCLUDE_SUBDOMAINS CRAWL_IGNORE_PATTERNS CRAWL_ENABLED
+
 # ─── reports 目錄（raw/ 放原始輸出）─────────────────────────
 # 設計原則：這個 repo 是工具，不應儲存其他專案的測試結果。
 #   - 有 local_path → 報告寫進 <project>/.testing/reports/（跟著專案走）
@@ -158,6 +230,8 @@ else
 fi
 echo "║  PHP：     $PHP_VERSION"
 echo "║  範圍：    $SCOPE"
+echo "║  Auth：    disabled（預設；session capture 流程已停用）"
+echo "║  E2E 巡檢：max_depth=$CRAWL_MAX_DEPTH max_pages=$CRAWL_MAX_PAGES enabled=$CRAWL_ENABLED"
 echo "║  報告：    $REPORTS_DIR/"
 echo "╚══════════════════════════════════════════════════╝"
 
@@ -295,11 +369,18 @@ run_security() {
 run_stress() {
     enabled stress || { echo "⏭  12 Performance - Load Test：略過"; return 0; }
     echo ""
-    echo "▶ 12 Performance - Load Test (k6)"
+    echo "▶ 12 Performance - Load Test (k6, journey-based)"
     echo "──────────────────────────────────────────"
     K6_VUS=$(yq -r '.tests.stress.vus // 10' "$TESTING_YML")
     K6_DURATION=$(yq -r '.tests.stress.duration // "30s"' "$TESTING_YML")
     export K6_VUS K6_DURATION
+    if [ -n "$JOURNEYS_JSON" ]; then
+        local jc
+        jc=$(node -e 'console.log(JSON.parse(process.argv[1]).length)' "$JOURNEYS_JSON" 2>/dev/null || echo "?")
+        echo "  Journey 數：$jc  | 總 VUs=$K6_VUS  | 時長=$K6_DURATION"
+    else
+        echo "  未配置 journeys → 退化單一匿名 / journey  | VUs=$K6_VUS  | 時長=$K6_DURATION"
+    fi
     docker compose --profile stress up --abort-on-container-exit || echo "  (k6 結束碼 $?)"
 }
 
@@ -354,18 +435,23 @@ run_e2e() {
     local env_args=()
     [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
 
-    # 偵測 storageState：使用者上傳的 session 檔（cookies+localStorage）
+    # 2026-04-30 起 session 流程預設停用；storage_mount 一律空陣列
+    # （留變數以維持後續 docker run 命令結構不變，未來若要恢復 session 模式再填）
     local storage_mount=()
     local storage_env=()
-    if [ -n "$PROJECT_PATH" ] && [ -f "$PROJECT_PATH/.testing/storage-state.json" ]; then
-        storage_mount=(-v "$PROJECT_PATH/.testing/storage-state.json:/work/storage-state.json:ro")
-        storage_env=(-e STORAGE_STATE_PATH=/work/storage-state.json)
-        echo "  ✓ 偵測到 session 檔 → 跳過表單登入，直接帶 cookie 進站"
-    fi
+
+    # E2E 巡檢需要的 crawl 設定，從 host env 透傳到 container
+    local crawl_env=(
+        -e CRAWL_MAX_DEPTH="$CRAWL_MAX_DEPTH"
+        -e CRAWL_MAX_PAGES="$CRAWL_MAX_PAGES"
+        -e CRAWL_INCLUDE_SUBDOMAINS="$CRAWL_INCLUDE_SUBDOMAINS"
+        -e CRAWL_IGNORE_PATTERNS="$CRAWL_IGNORE_PATTERNS"
+        -e CRAWL_ENABLED="$CRAWL_ENABLED"
+    )
 
     if $LOCAL_MODE && [ -f "$PROJECT_PATH/.testing/e2e/package.json" ]; then
         # ① 本地模式：跑專案自備 spec
-        docker run --rm "${env_args[@]}" "${storage_env[@]}" \
+        docker run --rm "${env_args[@]}" "${storage_env[@]}" "${crawl_env[@]}" \
             -e TARGET_URL="$TARGET_URL" \
             -v "$PROJECT_PATH/.testing/e2e:/work" \
             "${storage_mount[@]}" \
@@ -382,9 +468,9 @@ run_e2e() {
             ' \
             || echo "  (playwright 結束碼 $?)"
     else
-        # ② URL-only 模式：跑 pipeline 自帶的泛用 spec
-        echo "  ℹ️  URL-only 模式 → 使用 pipeline 內建泛用 E2E（smoke + 安全標頭 + 登入驗證）"
-        docker run --rm "${env_args[@]}" "${storage_env[@]}" \
+        # ② URL-only 模式：跑 pipeline 自帶的泛用 spec（含 crawl）
+        echo "  ℹ️  URL-only 模式 → 使用 pipeline 內建泛用 E2E（smoke + 安全標頭 + 全頁巡檢）"
+        docker run --rm "${env_args[@]}" "${storage_env[@]}" "${crawl_env[@]}" \
             -e TARGET_URL="$TARGET_URL" \
             -v "$ROOT/tests/e2e:/work" \
             -v "$ROOT/tests/_shared:/work/_shared:ro" \
@@ -400,6 +486,7 @@ run_e2e() {
             || echo "  (playwright 結束碼 $?)"
     fi
     echo "  報告：$REPORTS_RAW/playwright/index.html"
+    echo "  巡檢報告：$REPORTS_RAW/crawl-report.json（若 e2e crawl 已啟用）"
 }
 
 # ─── 10 Security - Nuclei ───
@@ -422,11 +509,24 @@ run_lighthouse() {
     echo ""
     echo "▶ 08 Web - Lighthouse (Lighthouse)"
     echo "──────────────────────────────────────────"
-    local pages
-    pages=$(yq -r '(.tests.lighthouse.pages // ["/"]) | join(" ")' "$TESTING_YML")
-    LIGHTHOUSE_PAGES="$pages"
+    # 舊 LIGHTHOUSE_PAGES（空白分隔字串）：給沒升級到 JSON 的場景留 fallback
+    # 新 LIGHTHOUSE_PAGES_JSON：[{path, auth}] — 由前置 init 區塊已 export
+    local pages_legacy
+    pages_legacy=$(yq -r '(.tests.lighthouse.pages // ["/"]) | map(if type == "!!map" then .path else . end) | join(" ")' "$TESTING_YML" 2>/dev/null || echo "/")
+    LIGHTHOUSE_PAGES="$pages_legacy"
     LIGHTHOUSE_PRESET=$(yq -r '.tests.lighthouse.preset // "desktop"' "$TESTING_YML")
     export LIGHTHOUSE_PAGES LIGHTHOUSE_PRESET
+    # 顯示 auth 頁數（cookie 才生效）
+    if [ -n "$LIGHTHOUSE_PAGES_JSON" ] && command -v node >/dev/null 2>&1; then
+        local lh_summary
+        lh_summary=$(node -e '
+          const a = JSON.parse(process.argv[1] || "[]");
+          const total = a.length;
+          const auth = a.filter(x => x.auth).length;
+          process.stdout.write(`頁面：${total}（其中 auth=${auth}）`);
+        ' "$LIGHTHOUSE_PAGES_JSON" 2>/dev/null || echo "頁面：?")
+        echo "  $lh_summary  | Cookie：$([ -n "$TARGET_COOKIE" ] && echo '✓' || echo '✗')"
+    fi
     # 清理舊 lighthouse 報告（只留本次）
     rm -f "$REPORTS_RAW"/lighthouse-*.report.* "$REPORTS_RAW/lighthouse-manifest.json" 2>/dev/null || true
     docker compose --profile lighthouse up --build --abort-on-container-exit || echo "  (lighthouse 結束碼 $?)"
@@ -450,13 +550,13 @@ run_monkey() {
     rm -rf "$REPORTS_RAW/monkey-html" 2>/dev/null || true
     # 只 mount 原始碼，不 mount node_modules（Windows 路徑的 binary 在 Linux container 無法執行）
     # container 在 /work 裡自行安裝乾淨的 Linux 版套件
-    # 偵測 session 檔：有的話 Playwright 直接帶 cookie 進站，繞過 CAPTCHA
+    # session 檔：用前置已解析的 STORAGE_STATE_PATH，Playwright 直接帶 cookie 繞過 CAPTCHA
     local storage_mount=()
     local storage_env=()
-    if [ -n "$PROJECT_PATH" ] && [ -f "$PROJECT_PATH/.testing/storage-state.json" ]; then
-        storage_mount=(-v "$PROJECT_PATH/.testing/storage-state.json:/work/storage-state.json:ro")
+    if [ -n "$STORAGE_STATE_PATH" ] && [ -f "$STORAGE_STATE_PATH" ]; then
+        storage_mount=(-v "$STORAGE_STATE_PATH:/work/storage-state.json:ro")
         storage_env=(-e STORAGE_STATE_PATH=/work/storage-state.json)
-        echo "  ✓ 偵測到 session 檔 → 跳過表單登入，monkey 直接帶 cookie"
+        echo "  ✓ 載入 session 檔 → 跳過表單登入，monkey 直接帶 cookie"
     fi
     docker run --rm "${env_args[@]}" "${storage_env[@]}" \
         -e TARGET_URL="$TARGET_URL" \

@@ -30,10 +30,11 @@
         </label>
 
         <fieldset>
-          <legend>測試人員帳號（選填，最多 2 組；提供給 API / Auth 測試使用）</legend>
+          <legend>測試人員帳號（選填；只有 API / Auth 測試會用到）</legend>
+          <p class="hint">目標站若已關後端 auth，**不必填**——pipeline 預設不做登入動作。</p>
           <div class="tester-row">
-            <input type="text" name="tester1_user" placeholder="帳號" value="admin001" autocomplete="off">
-            <input type="text" name="tester1_pass" placeholder="密碼" value="@admin001" autocomplete="off">
+            <input type="text" name="tester1_user" placeholder="帳號（選填）" autocomplete="off">
+            <input type="text" name="tester1_pass" placeholder="密碼（選填）" autocomplete="off">
           </div>
           <div class="tester-row">
             <input type="text" name="tester2_user" placeholder="帳號（選填）" autocomplete="off">
@@ -61,25 +62,18 @@
           <label class="check"><input type="checkbox" name="scope" value="lighthouse" checked> 效能 / 無障礙 (Lighthouse)</label>
           <label class="check"><input type="checkbox" name="scope" value="links"> 死連結檢查 (Lychee)</label>
           <label class="check"><input type="checkbox" name="scope" value="stress"> 負載測試 (k6)</label>
-          <label class="check"><input type="checkbox" name="scope" value="e2e"> 端對端測試 (Playwright，自動登入 + 內頁巡檢)</label>
+          <label class="check"><input type="checkbox" name="scope" value="e2e" checked> 端對端測試 (Playwright，全頁巡檢每個分頁可達)</label>
           <label class="check"><input type="checkbox" name="scope" value="monkey"> Monkey 隨機點擊 (Gremlins)</label>
           <label class="check"><input type="checkbox" name="scope" value="api-test"> API 測試（需上傳 OpenAPI）</label>
         </fieldset>
 
-        <fieldset>
-          <legend>Session（選填，避開驗證碼 / 2FA）</legend>
-
-          <div class="prelogin">
-            <strong>路徑 A：跳出視窗手動登入</strong>
-            <button type="button" id="prelogin-browser-btn">🪟 開啟瀏覽器登入</button>
-            <p id="prelogin-browser-status" class="status"></p>
-          </div>
-
-          <label class="path-b">
-            <span>路徑 B：手動貼上（備援）</span>
-            <textarea name="storage_state_text" id="storage_state_text" rows="8" placeholder='貼上 Cookie-Editor → Export 的 JSON 陣列，或 Playwright storageState 物件 {"cookies":[...],"origins":[...]}'></textarea>
-          </label>
-        </fieldset>
+        <!--
+          Session 區塊已於 2026-04-30 廢棄：目標站多數已關後端 auth，
+          pipeline 預設**不**走登入流程。底下保留隱藏欄位讓 server.js 的
+          表單解析不出錯；要恢復 session 模式請另開 dev 流程，
+          參考 tests/scripts/lib/session-capture.js 與 ui/lib/prelogin-browser.js。
+        -->
+        <input type="hidden" name="storage_state_text" id="storage_state_text" value="">
       </div>
     </div>
 
@@ -91,7 +85,10 @@
     <h2>執行進度</h2>
     <p id="progress-summary" class="progress-summary">準備中…</p>
     <ul id="progress-list" class="progress-list"></ul>
-    <button type="button" id="download-btn" class="download-btn" disabled>⬇ 下載報告（測試結束後可下載）</button>
+    <div class="run-actions">
+      <button type="button" id="cancel-btn" class="cancel-btn" hidden>✋ 取消測試</button>
+      <button type="button" id="download-btn" class="download-btn" disabled>⬇ 下載報告（測試結束後可下載）</button>
+    </div>
   </section>
 </main>
 <script src="app.js"></script>

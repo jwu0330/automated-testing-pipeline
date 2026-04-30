@@ -1,20 +1,19 @@
 // ════════════════════════════════════════════════════════════════
 // tests/scripts/lib/session-capture.js — 共用 session 擷取（UI + Skill 共用）
 //
-// 流程：spawn `npx playwright open --save-storage` → 使用者在跳出的真瀏覽器
-//   手動登入（CAPTCHA / 2FA / SSO 都行）→ 關閉視窗 → 讀 storageState 回來
+// 流程：spawn `ui/lib/prelogin-browser.js`（自寫 Playwright 腳本）→
+//   開窗 → goto loginUrl → 若提供帳密就自動填 → 等使用者解 CAPTCHA / 2FA、按送出 →
+//   關閉視窗 → 讀 storageState 回來
 //
 // 對外 API：
-//   captureSession({ loginUrl, outputPath, timeoutMs?, uiCwd, onLog? })
+//   captureSession({ loginUrl, outputPath, timeoutMs?, uiCwd, onLog?, username?, password? })
 //     — loginUrl   : 要開的目標頁
-//     — outputPath : Playwright 寫 storageState 的位置
+//     — outputPath : 把 storageState 寫到這
 //     — timeoutMs  : 視窗最長存活時間，預設 5 分鐘
-//     — uiCwd      : Playwright 安裝目錄（必須含 node_modules/playwright）
+//     — uiCwd      : Playwright 安裝目錄（必須含 node_modules/playwright + lib/prelogin-browser.js）
 //     — onLog      : 收 child stdout/stderr 的 callback（選填）
+//     — username/password : 選填；提供時 prelogin-browser 會自動填表，使用者只需處理 CAPTCHA/2FA
 //     回傳 { ok, reason, storageState?, outputPath?, hint?, stderr? }
-//
-// 為什麼 Playwright 在 ui/：歷史原因，UI 先用，沒必要為 Skill 重裝一份。
-// 兩邊都從 <root>/ui 啟動，靠 cwd 找 node_modules/playwright。
 // ════════════════════════════════════════════════════════════════
 const fs = require('fs');
 const path = require('path');
@@ -22,7 +21,7 @@ const { spawn } = require('child_process');
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
-function captureSession({ loginUrl, outputPath, timeoutMs, uiCwd, onLog }) {
+function captureSession({ loginUrl, outputPath, timeoutMs, uiCwd, onLog, username, password }) {
   return new Promise((resolve) => {
     const log = onLog || (() => {});
     timeoutMs = timeoutMs || DEFAULT_TIMEOUT_MS;
@@ -43,23 +42,30 @@ function captureSession({ loginUrl, outputPath, timeoutMs, uiCwd, onLog }) {
       });
       return;
     }
+    const scriptPath = path.join(uiCwd, 'lib', 'prelogin-browser.js');
+    if (!fs.existsSync(scriptPath)) {
+      resolve({
+        ok: false,
+        reason: `找不到 prelogin 腳本：${scriptPath}`,
+      });
+      return;
+    }
 
     try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch {}
 
     let stderr = '';
     let timedOut = false;
 
-    // Node 20+ 在 Windows 直接 spawn .cmd 會 EINVAL；shell:true 是必要的。
-    // 引號 loginUrl 避免 query string 的 & 被 shell 當作分隔符切斷。
-    const args = ['playwright', 'open', `--save-storage="${outputPath}"`, `"${loginUrl}"`];
-    const cmdline = `npx ${args.join(' ')}`;
-    log(`[session-capture] $ ${cmdline}\n[session-capture] cwd=${uiCwd}\n`);
+    // 直接 spawn node binary 跑自寫腳本：避免 npx 包一層 shell，也避免 .cmd / quoting 雷。
+    // username/password 走 argv 而非環境變數，讓使用者在 server log 看不到密碼明文（child argv 不寫 log）。
+    const argv = [scriptPath, '--url', loginUrl, '--save', outputPath];
+    if (username && password) argv.push('--user', username, '--pass', password);
+    log(`[session-capture] $ node lib/prelogin-browser.js --url ${loginUrl} --save ${outputPath}${username ? ' --user *** --pass ***' : ''}\n[session-capture] cwd=${uiCwd}\n`);
 
-    const child = spawn(cmdline, [], {
+    const child = spawn(process.execPath, argv, {
       cwd: uiCwd,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
     });
     // Playwright 的訊息 stdout / stderr 都會走，全部累積給 caller 看
     child.stderr.on('data', (d) => { const s = d.toString(); stderr += s; log(s); });

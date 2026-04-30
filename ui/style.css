@@ -177,9 +177,25 @@ button:disabled { background: #999; cursor: not-allowed; }
 .progress-list li.running { color: var(--accent); font-weight: 600; }
 .progress-list li.skipped { color: #aaa; }
 .progress-list li.failed  { color: var(--error); }
-.download-btn {
-  display: inline-block;
+.run-actions {
+  display: flex;
+  gap: .6rem;
+  flex-wrap: wrap;
   margin-top: .5rem;
+}
+.cancel-btn {
+  background: var(--error);
+  color: #fff;
+  padding: .6rem 1.2rem;
+  border-radius: 5px;
+  border: 0;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cancel-btn:hover:not(:disabled) { filter: brightness(1.05); }
+.cancel-btn:disabled { background: #c8cdd2; cursor: not-allowed; }
+.download-btn {
   background: var(--ok);
   color: #fff;
   padding: .6rem 1.2rem;

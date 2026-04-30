@@ -28,10 +28,13 @@ export type LoginAttempt = {
 export type LoginResult = LoginAttempt['result'];
 
 /**
- * 啟發式登入。優先順序：
- *   1. 有 STORAGE_STATE_PATH（Playwright config 已套用）→ 視為已登入，跳過表單
- *   2. 有 ADMIN_USERNAME/PASSWORD → 偵測登入頁表單，自動填入並送出
- *   3. 都沒有 → 視為匿名測試
+ * 啟發式登入（保留 code，預設不啟用）。
+ *
+ * 2026-04-30 起：目標站多數已關後端 token 驗證、UI 是裝飾——預設**不嘗試**任何登入。
+ * 要恢復舊行為，set env `LOGIN_REQUIRED=true`：
+ *   1. 有 STORAGE_STATE_PATH → session 模式
+ *   2. 有 ADMIN_USERNAME/PASSWORD → 表單模式
+ *   3. 都沒有 → 匿名（與預設相同）
  *
  * 每次呼叫都會寫 /reports/login-status.json，summarize.js 會讀取後組成報告區塊。
  */
@@ -40,6 +43,7 @@ export async function loginIfPossible(
   opts?: { uiUrl?: string; user?: string; pass?: string; timeoutMs?: number }
 ): Promise<LoginResult> {
   const targetUrl = opts?.uiUrl ?? process.env.TARGET_UI_URL ?? process.env.TARGET_URL ?? '';
+  const loginRequired = (process.env.LOGIN_REQUIRED || '').toLowerCase() === 'true';
   const hasStorageState = !!process.env.STORAGE_STATE_PATH;
   const user = opts?.user ?? process.env.ADMIN_USERNAME ?? '';
   const pass = opts?.pass ?? process.env.ADMIN_PASSWORD ?? '';
@@ -50,7 +54,7 @@ export async function loginIfPossible(
     scenario: {
       targetUrl,
       landingUrl: '',
-      mode: hasStorageState ? 'session' : (hasCreds ? 'form' : 'anonymous'),
+      mode: !loginRequired ? 'anonymous' : (hasStorageState ? 'session' : (hasCreds ? 'form' : 'anonymous')),
       hasStorageState,
       hasCreds,
     },
@@ -64,6 +68,16 @@ export async function loginIfPossible(
     return r;
   };
 
+  // 預設停用登入流程：直接回傳「匿名」狀態，不訪問頁面、不檢查任何欄位
+  if (!loginRequired) {
+    actions.push('LOGIN_REQUIRED 未設或為 false → 預設匿名模式（目標站視為無 auth）');
+    return finalize({
+      attempted: false,
+      success: false,
+      reason: 'login disabled by default (LOGIN_REQUIRED!=true) — 視為已登入或目標無 auth',
+    });
+  }
+
   // ① Session 模式：Playwright config 已套用 storageState，瀏覽器一開就帶 cookie
   if (hasStorageState) {
     actions.push(`使用上傳的 session 檔（STORAGE_STATE_PATH=${process.env.STORAGE_STATE_PATH}）`);
@@ -71,14 +85,25 @@ export async function loginIfPossible(
       return finalize({ attempted: false, success: false, reason: 'session 已套用但無 TARGET_URL，無法驗證' });
     }
     actions.push(`訪問 ${targetUrl} 驗證 session 有效性`);
+    // 兩階段：先 commit（任何 response 一回來就算成功 navigate），再嘗試 domcontentloaded
+    // 避免 SPA 的 Connect-Source / 第三方 script 卡住 domcontentloaded 把驗證搞垮
+    let gotoOk = true;
+    let gotoErr = '';
     try {
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: opts?.timeoutMs ?? 30_000 });
+      await page.goto(targetUrl, { waitUntil: 'commit', timeout: opts?.timeoutMs ?? 60_000 });
+      // 給 DOM 一點時間 render；超時就拿目前狀態檢查，不算失敗
+      await page.waitForLoadState('domcontentloaded', { timeout: 20_000 }).catch(() => {});
     } catch (e: any) {
-      return finalize({ attempted: true, success: false, reason: `訪問目標頁失敗：${e.message}` });
+      gotoOk = false;
+      gotoErr = e.message;
+      actions.push(`page.goto 逾時：${e.message}（仍嘗試在當前 DOM 上檢查）`);
     }
-    attempt.scenario.landingUrl = page.url();
-    const stillHasPw = (await page.locator('input[type=password]').count()) > 0;
-    if (stillHasPw) {
+    attempt.scenario.landingUrl = page.url() || targetUrl;
+    const pwCount = await page.locator('input[type=password]').count().catch(() => -1);
+    if (!gotoOk && pwCount < 0) {
+      return finalize({ attempted: true, success: false, reason: `訪問目標頁失敗：${gotoErr}` });
+    }
+    if (pwCount > 0) {
       actions.push('偵測到頁面仍有 input[type=password] → 推斷 session 已過期或未對應到目標站');
       return finalize({
         attempted: true,
@@ -87,7 +112,12 @@ export async function loginIfPossible(
         finalUrl: page.url(),
       });
     }
-    return finalize({ attempted: true, success: true, reason: '使用上傳 session，訪問後未見登入頁', finalUrl: page.url() });
+    return finalize({
+      attempted: true,
+      success: true,
+      reason: gotoOk ? '使用上傳 session，訪問後未見登入頁' : `使用上傳 session — page.goto 雖逾時但已偵測不到登入頁（${gotoErr}）`,
+      finalUrl: page.url(),
+    });
   }
 
   // ② 匿名（沒帳密）

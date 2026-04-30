@@ -165,6 +165,8 @@ function parseZAP() {
 }
 
 // ─── ④ k6 ────────────────────────────────────────────────
+// 同時抽 per-journey 指標：load-test.js 給每個 scenario 加了 `{journey:NAME}` tag，
+// k6 summary 會出現 `http_req_duration{journey:foo}` 這種子 metric。
 function parseK6() {
   const p = findRaw('k6-summary.json');
   if (!p) return { status: 'no-report' };
@@ -174,13 +176,70 @@ function parseK6() {
       for (const k of keys) if (obj?.[k] != null) return obj[k];
       return null;
     };
+    const v = (key, ...subs) => {
+      const obj = m[key];
+      if (!obj) return null;
+      return pick(obj, ...subs) ?? pick(obj.values || {}, ...subs);
+    };
+    // 全域指標（保留向後相容）
+    const overall = {
+      totalReqs: v('http_reqs', 'count') ?? 0,
+      avgMs: v('http_req_duration', 'avg') ?? 0,
+      p95Ms: v('http_req_duration', 'p(95)') ?? 0,
+      failedPct: (v('http_req_failed', 'rate') ?? 0) * 100,
+    };
+    // per-journey：掃所有 `http_req_duration{journey:X}` 與 `http_reqs{journey:X}`
+    const journeys = {};
+    for (const key of Object.keys(m)) {
+      const tagMatch = key.match(/^([a-z_]+)\{journey:([^,}]+)(?:,[^}]*)?\}$/i);
+      if (!tagMatch) continue;
+      const [, metric, jname] = tagMatch;
+      if (!journeys[jname]) journeys[jname] = {};
+      if (metric === 'http_req_duration') {
+        journeys[jname].avgMs = v(key, 'avg') ?? 0;
+        journeys[jname].p95Ms = v(key, 'p(95)') ?? 0;
+      } else if (metric === 'http_reqs') {
+        journeys[jname].reqs = v(key, 'count') ?? 0;
+      } else if (metric === 'http_req_failed') {
+        journeys[jname].failedPct = (v(key, 'rate') ?? 0) * 100;
+      }
+    }
     return {
-      totalReqs: pick(m.http_reqs, 'count') ?? pick(m.http_reqs?.values || {}, 'count') ?? 0,
-      avgMs: pick(m.http_req_duration, 'avg') ?? pick(m.http_req_duration?.values || {}, 'avg') ?? 0,
-      p95Ms: pick(m.http_req_duration, 'p(95)') ?? pick(m.http_req_duration?.values || {}, 'p(95)') ?? 0,
-      failedPct: ((pick(m.http_req_failed, 'rate') ?? pick(m.http_req_failed?.values || {}, 'rate') ?? 0) * 100),
+      ...overall,
+      journeys: Object.entries(journeys).map(([name, x]) => ({ name, ...x })),
     };
   } catch (e) { return { status: 'parse-error', error: e.message }; }
+}
+
+// ─── 認證上下文（2026-04-30 起預設停用；保留 parser 為了讀舊報告）──────
+function parseAuthContext() {
+  const p = findRaw('auth-context.json');
+  if (!p) return null;
+  try { return JSON.parse(read(p)); } catch { return null; }
+}
+
+// ─── ⑫ E2E 全頁巡檢（crawl）──────────────────────────────
+function parseCrawl() {
+  const p = findRaw('crawl-report.json');
+  if (!p) return { status: 'no-report' };
+  try {
+    const data = JSON.parse(read(p));
+    return {
+      target: data.target,
+      visited: data.visited || 0,
+      ok: data.ok || 0,
+      failed: data.failed || 0,
+      hit_max_pages: !!data.hit_max_pages,
+      max_depth: data.max_depth,
+      max_pages: data.max_pages,
+      pages: Array.isArray(data.pages) ? data.pages : [],
+      failures: Array.isArray(data.pages)
+        ? data.pages.filter(p => !p.ok || p.redirectedToLogin)
+        : [],
+    };
+  } catch (e) {
+    return { status: 'parse-error', error: e.message };
+  }
 }
 
 // 數 testcase 元素（比解析 testsuite 聚合屬性更穩，因為 Newman/Playwright
@@ -407,6 +466,8 @@ function parseWarnings() {
 // 解析
 // ═══════════════════════════════════════════════════════════════
 const warnings = parseWarnings();
+const authCtx = parseAuthContext();
+const crawl = parseCrawl();
 const s  = parseSSL();
 const ps = parsePHPStan();
 const z  = parseZAP();
@@ -440,6 +501,25 @@ if (warnings.length) {
   L.push('');
   for (const w of warnings) {
     L.push(`- ⚠️  ${w}`);
+  }
+  L.push('');
+}
+
+// ─── 全頁巡檢覆蓋（取代過去的「認證後測試覆蓋」區塊）─────────
+// 這是「真的有測到裡面」的關鍵訊號：起點頁進得去、所有同源連結也都進得去
+if (!crawl.status) {
+  L.push('## 全頁巡檢覆蓋');
+  L.push('');
+  const total = crawl.visited;
+  const ok = crawl.ok;
+  const failed = crawl.failed;
+  if (failed === 0 && total > 0) {
+    L.push(`- ✅ **${ok} / ${total}** 個分頁皆可達（深度 ≤ ${crawl.max_depth}）`);
+  } else {
+    L.push(`- ⚠ **${ok} / ${total}** 個分頁正常；${failed} 頁失敗（4xx/5xx 或被踢回登入頁）`);
+  }
+  if (crawl.hit_max_pages) {
+    L.push(`- 已達 max_pages=${crawl.max_pages} 上限 → 還有未巡到的頁，調 \`tests.e2e.crawl.max_pages\` 放寬`);
   }
   L.push('');
 }
@@ -559,6 +639,16 @@ if (lc.status === 'no-report') {
   L.push(`⑪ 連結檢查        ${lc.total - lc.errors}/${lc.total} OK  broken=${lc.errors}${trend(lc.errors, prev?.links?.errors)}`);
 }
 
+// ⑫ Crawl 全頁巡檢
+if (crawl.status === 'no-report') {
+  L.push('⑫ 全頁巡檢        (無報告)');
+} else if (crawl.status === 'parse-error') {
+  L.push(`⑫ 全頁巡檢        解析失敗：${crawl.error}`);
+} else {
+  const trendStr = trend(crawl.failed, prev?.crawl?.failed);
+  L.push(`⑫ 全頁巡檢        ${crawl.ok}/${crawl.visited} 可達  fail=${crawl.failed}${trendStr}`);
+}
+
 L.push('```');
 L.push('');
 
@@ -673,6 +763,19 @@ if (!k.status) {
   L.push(`- avg：${Math.round(k.avgMs)}ms  |  p95：${Math.round(k.p95Ms)}ms`);
   L.push(`- 失敗率：${k.failedPct.toFixed(2)}%`);
   L.push('');
+  if (k.journeys?.length) {
+    L.push('**Per-journey 指標**');
+    L.push('');
+    L.push('| Journey | reqs | avg | p95 | failed |');
+    L.push('|---------|----:|----:|----:|-------:|');
+    for (const j of k.journeys) {
+      const avg = j.avgMs != null ? `${Math.round(j.avgMs)}ms` : '—';
+      const p95 = j.p95Ms != null ? `${Math.round(j.p95Ms)}ms` : '—';
+      const fp = j.failedPct != null ? `${j.failedPct.toFixed(2)}%` : '—';
+      L.push(`| \`${j.name}\` | ${j.reqs ?? '—'} | ${avg} | ${p95} | ${fp} |`);
+    }
+    L.push('');
+  }
 }
 
 // ⑤ API 測試
@@ -735,19 +838,24 @@ if (!nu.status && nu.total > 0) {
 if (!lh.status) {
   L.push('### ⑧ 前端品質 Lighthouse');
   L.push('');
-  L.push('| 頁面 | Perf | A11y | BP | SEO | LCP | CLS | TBT |');
-  L.push('|------|:----:|:----:|:--:|:---:|----:|----:|----:|');
+  L.push('| 頁面 | Auth | Perf | A11y | BP | SEO | LCP | CLS | TBT |');
+  L.push('|------|:----:|:----:|:----:|:--:|:---:|----:|----:|----:|');
   for (const pg of lh.pages) {
     const relPath = (() => {
       try { return new URL(pg.url).pathname; } catch { return pg.url; }
     })();
+    const auth = pg.auth ? '🔒' : '';
     const lcp = pg.metrics?.lcp_ms != null ? `${Math.round(pg.metrics.lcp_ms)}ms` : '—';
     const cls = pg.metrics?.cls != null ? pg.metrics.cls.toFixed(3) : '—';
     const tbt = pg.metrics?.tbt_ms != null ? `${Math.round(pg.metrics.tbt_ms)}ms` : '—';
-    L.push(`| \`${relPath}\` | ${pg.scores.performance} | ${pg.scores.accessibility} | ${pg.scores.best_practices} | ${pg.scores.seo} | ${lcp} | ${cls} | ${tbt} |`);
+    L.push(`| \`${relPath}\` | ${auth} | ${pg.scores.performance} | ${pg.scores.accessibility} | ${pg.scores.best_practices} | ${pg.scores.seo} | ${lcp} | ${cls} | ${tbt} |`);
   }
   L.push('');
   L.push(`平均：Perf=${lh.avg.performance} · A11y=${lh.avg.accessibility} · BP=${lh.avg.best_practices} · SEO=${lh.avg.seo}`);
+  if (lh.pages.some(p => p.auth)) {
+    L.push('');
+    L.push('🔒 = 該頁帶 cookie 載入（需 session）；分數低於匿名頁多半反映後台真實 perf。');
+  }
   L.push('');
 }
 
@@ -817,6 +925,37 @@ if (!lc.status && lc.broken.length > 0) {
   L.push('');
 }
 
+// ⑫ E2E 全頁巡檢
+if (!crawl.status && crawl.pages.length) {
+  L.push(`### ⑫ 全頁巡檢 Crawl (${crawl.ok}/${crawl.visited} 通過)`);
+  L.push('');
+  L.push('| 路徑 | 深度 | 狀態 | 載入 (ms) | 連結數 | 結果 |');
+  L.push('|------|:----:|:----:|---------:|------:|:----:|');
+  for (const p of crawl.pages.slice(0, 100)) {
+    let pathOnly = p.url;
+    try { pathOnly = new URL(p.url).pathname + (new URL(p.url).search || ''); } catch {}
+    const verdict = p.redirectedToLogin
+      ? '⚠ 踢回登入'
+      : p.ok ? '✓' : '✗';
+    L.push(`| \`${pathOnly}\` | ${p.depth} | ${p.status || '—'} | ${p.load_ms ?? '—'} | ${p.links_found ?? 0} | ${verdict} |`);
+  }
+  if (crawl.pages.length > 100) {
+    L.push(`- _（餘 ${crawl.pages.length - 100} 筆見 raw/crawl-report.json）_`);
+  }
+  L.push('');
+  if (crawl.failures.length) {
+    L.push('**失敗詳情：**');
+    L.push('');
+    for (const f of crawl.failures.slice(0, 30)) {
+      const msg = f.redirectedToLogin
+        ? `被踢回登入頁（final=${f.finalUrl}）`
+        : `HTTP ${f.status}${f.jsErrors?.length ? `；${f.jsErrors.length} JS 錯誤` : ''}`;
+      L.push(`- \`${f.url}\` ← from \`${f.from}\` — ${msg}`);
+    }
+    L.push('');
+  }
+}
+
 // ─── 歷史 ────────────────────────────────────────────────
 L.push('## 最近執行');
 L.push('');
@@ -830,6 +969,7 @@ const entry = {
     p95: Math.round(k.p95Ms),
     fail: +k.failedPct.toFixed(2),
     reqs: k.totalReqs,
+    journeys: (k.journeys || []).length,
   },
   e2e: pw.status ? null : { tests: pw.tests, failures: pw.failures },
   api: api.status ? null : {
@@ -848,6 +988,10 @@ const entry = {
     secrets: tv.secrets.length, misconfigs: tv.misconfigs.length,
   },
   links: lc.status ? null : { total: lc.total, errors: lc.errors },
+  crawl: crawl.status ? null : {
+    visited: crawl.visited, ok: crawl.ok, failed: crawl.failed,
+    hit_max_pages: crawl.hit_max_pages,
+  },
 };
 const recent = history.slice(-4).concat([entry]);
 for (const e of recent) {
@@ -883,6 +1027,7 @@ L.push('| `raw/lighthouse-manifest.json` `raw/lighthouse-*.report.html` | Lighth
 L.push('| `raw/monkey-report.json` `raw/monkey-html/index.html` | Monkey (Gremlins) JSON + HTML |');
 L.push('| `raw/trivy-fs.json` | Trivy 供應鏈掃描 |');
 L.push('| `raw/lychee.json` | Lychee 壞連結清單 |');
+L.push('| `raw/crawl-report.json` | E2E 全頁巡檢：每個分頁的可達狀態 / JS 錯誤 / 載入時間 |');
 L.push('');
 
 // ─── 寫檔 ────────────────────────────────────────────────
@@ -895,6 +1040,7 @@ const structured = {
   timestamp: now,
   run_count: history.length + 1,
   warnings,
+  auth_context: authCtx,
   ssl: s.status ? { status: s.status } : { grade: s.grade, score: parseInt(s.score, 10) || null },
   static: ps.status ? { status: ps.status } : {
     errors: ps.total,
@@ -908,6 +1054,7 @@ const structured = {
     avg_ms: Math.round(k.avgMs),
     failed_pct: +k.failedPct.toFixed(2),
     total_reqs: k.totalReqs,
+    journeys: k.journeys || [],
   },
   e2e: pw.status ? { status: pw.status } : {
     tests: pw.tests, failures: pw.failures, fails: pw.fails,
@@ -937,6 +1084,14 @@ const structured = {
   links: lc.status ? { status: lc.status } : {
     total: lc.total, successful: lc.successful, errors: lc.errors,
     timeouts: lc.timeouts, excluded: lc.excluded, broken: lc.broken,
+  },
+  crawl: crawl.status ? { status: crawl.status } : {
+    target: crawl.target,
+    visited: crawl.visited,
+    ok: crawl.ok,
+    failed: crawl.failed,
+    hit_max_pages: crawl.hit_max_pages,
+    pages: crawl.pages,
   },
   history_recent: history.slice(-4).concat([entry]),
   report_md: path.join(REPORT_DIR, 'report.md'),
