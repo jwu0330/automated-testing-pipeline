@@ -336,6 +336,7 @@ tests: {}
 
   // 寫 .testing/.env：run-project.sh 會 source 這個檔（line 96-104）
   const envLines = [];
+  envLines.push('LOGIN_REQUIRED=true'); // 所有頁面都需登入
   if (targetUiUrl) envLines.push(`TARGET_UI_URL=${envQuote(targetUiUrl)}`);
   // tester1 → ADMIN_*，tester2 → USER1_*
   if (testers[0] && testers[0].user && testers[0].pass) {
@@ -346,9 +347,7 @@ tests: {}
     envLines.push(`USER1_USERNAME=${envQuote(testers[1].user)}`);
     envLines.push(`USER1_PASSWORD=${envQuote(testers[1].pass)}`);
   }
-  if (envLines.length > 0) {
-    fs.writeFileSync(path.join(testingDir, '.env'), envLines.join('\n') + '\n');
-  }
+  fs.writeFileSync(path.join(testingDir, '.env'), envLines.join('\n') + '\n');
 
   const logFile = path.join(jobDir, 'run.log');
   const statusFile = path.join(jobDir, 'status.json');
