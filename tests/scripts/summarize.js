@@ -232,6 +232,10 @@ function parseAuthDiscovery() {
       formPages: pages.filter(p => Array.isArray(p.forms) && p.forms.length).length,
       buttonPages: pages.filter(p => Array.isArray(p.buttons) && p.buttons.length).length,
       cookieHeaderPresent: !!data.cookieHeaderPresent,
+      extraHeadersPresent: !!data.extraHeadersPresent,
+      extraHeaderNames: Array.isArray(data.extraHeaderNames) ? data.extraHeaderNames : [],
+      sessionStorageKeys: Array.isArray(data.sessionStorageKeys) ? data.sessionStorageKeys : [],
+      localStorageKeys: Array.isArray(data.localStorageKeys) ? data.localStorageKeys : [],
       startUrl: data.startUrl || '',
     };
   } catch (e) {
@@ -556,6 +560,14 @@ if (authCtx) {
   if (authDiscovery?.status === 'ok') {
     L.push(`- Auth discovery: **${authDiscovery.okPages}/${authDiscovery.pages.length}** logged-in pages reachable; forms on ${authDiscovery.formPages} pages; buttons/actions on ${authDiscovery.buttonPages} pages.`);
     L.push(`- Same-job Cookie header for non-browser tools: **${authDiscovery.cookieHeaderPresent ? 'available' : 'not available'}**.`);
+    if (authDiscovery.extraHeadersPresent) {
+      L.push(`- Same-job auth headers (token-based): **${authDiscovery.extraHeaderNames.join(', ')}** — forwarded to ZAP / Nuclei / Lychee / Lighthouse / k6.`);
+    } else {
+      L.push('- Same-job auth headers (token-based): **none detected** — system likely uses cookies only, or no API call was observed during discovery.');
+    }
+    if (authDiscovery.sessionStorageKeys.length || authDiscovery.localStorageKeys.length) {
+      L.push(`- Browser storage seen: sessionStorage keys=[${authDiscovery.sessionStorageKeys.join(', ')}]; localStorage keys=[${authDiscovery.localStorageKeys.join(', ')}].`);
+    }
   } else if (authDiscovery?.status === 'parse-error') {
     L.push(`- Auth discovery parse error: ${authDiscovery.error}`);
   } else {
@@ -1079,6 +1091,8 @@ L.push('| `raw/trivy-fs.json` | Trivy 供應鏈掃描 |');
 L.push('| `raw/lychee.json` | Lychee 壞連結清單 |');
 L.push('| `raw/crawl-report.json` | E2E 全頁巡檢：每個分頁的可達狀態 / JS 錯誤 / 載入時間 |');
 L.push('| `raw/auth-discovery.json` `raw/auth-urls.txt` | 登入後黑箱探索結果，供壓測、ZAP、Nuclei、Lighthouse、Lychee 使用 |');
+L.push('| `raw/auth-headers.json` `raw/auth-extra-headers.txt` | 登入後攔到的 token-based headers（Authorization / X-*-Token），自動轉發給上述工具 |');
+L.push('| `raw/auth-storage.json` | 登入後 sessionStorage / localStorage 內容（debug 用，看 token 存在哪） |');
 L.push('');
 
 // ─── 寫檔 ────────────────────────────────────────────────

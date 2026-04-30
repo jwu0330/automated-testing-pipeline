@@ -28,6 +28,12 @@ if [ -s "$REPORT_DIR/auth-cookie-header.txt" ]; then
   COOKIE_HEADER="$(cat "$REPORT_DIR/auth-cookie-header.txt")"
 fi
 
+# 額外 auth headers — token-based 系統用（Authorization / X-Admin-Token 等）
+EXTRA_HEADERS_PATH=""
+if [ -s "$REPORT_DIR/auth-extra-headers.txt" ]; then
+  EXTRA_HEADERS_PATH="$REPORT_DIR/auth-extra-headers.txt"
+fi
+
 PAGES_TSV=$(node -e '
   const json = process.env.LIGHTHOUSE_PAGES_JSON || "";
   let arr = [];
@@ -54,6 +60,10 @@ if [ -n "$COOKIE_HEADER" ]; then
 else
   echo " Cookie: none"
 fi
+if [ -n "$EXTRA_HEADERS_PATH" ]; then
+  echo " Extra auth headers:"
+  awk -F: 'NF>=2 { printf "   - %s\n", $1 }' "$EXTRA_HEADERS_PATH" || true
+fi
 echo "──────────────────────────────"
 echo "$PAGES_TSV" | grep -c $'\t' >/dev/null 2>&1 || { echo "No Lighthouse pages"; exit 0; }
 
@@ -71,8 +81,32 @@ while IFS=$'\t' read -r page auth; do
   echo "[$i] $url"
 
   extra_headers_json=""
-  if [ "$auth" = "1" ] && [ -n "$COOKIE_HEADER" ]; then
-    extra_headers_json=$(node -e 'process.stdout.write(JSON.stringify({ Cookie: process.argv[1] }))' "$COOKIE_HEADER")
+  if [ "$auth" = "1" ]; then
+    # 把 Cookie + auth-extra-headers.txt 全部合進 --extra-headers
+    extra_headers_json=$(
+      COOKIE_HEADER="$COOKIE_HEADER" \
+      EXTRA_HEADERS_PATH="$EXTRA_HEADERS_PATH" \
+      node -e '
+        const fs = require("fs");
+        const out = {};
+        if (process.env.COOKIE_HEADER) out.Cookie = process.env.COOKIE_HEADER;
+        const p = process.env.EXTRA_HEADERS_PATH;
+        if (p) {
+          try {
+            for (const ln of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
+              const t = ln.trim();
+              if (!t || t.startsWith("#")) continue;
+              const i = t.indexOf(":");
+              if (i < 0) continue;
+              const name = t.slice(0, i).trim();
+              const value = t.slice(i + 1).trim();
+              if (name && value) out[name] = value;
+            }
+          } catch {}
+        }
+        process.stdout.write(Object.keys(out).length ? JSON.stringify(out) : "");
+      '
+    )
   fi
 
   set +e

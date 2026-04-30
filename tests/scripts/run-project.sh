@@ -447,7 +447,11 @@ run_stress() {
     if [ -z "${AUTH_COOKIE_HEADER:-}" ] && [ -s "$REPORTS_RAW/auth-cookie-header.txt" ]; then
         AUTH_COOKIE_HEADER="$(cat "$REPORTS_RAW/auth-cookie-header.txt")"
     fi
-    export K6_VUS K6_DURATION JOURNEYS_JSON AUTH_COOKIE_HEADER
+    # AUTH_EXTRA_HEADERS：來自 auth-discovery 攔到的 Authorization / X-*-Token 等
+    if [ -z "${AUTH_EXTRA_HEADERS:-}" ] && [ -s "$REPORTS_RAW/auth-headers.json" ]; then
+        AUTH_EXTRA_HEADERS="$(cat "$REPORTS_RAW/auth-headers.json")"
+    fi
+    export K6_VUS K6_DURATION JOURNEYS_JSON AUTH_COOKIE_HEADER AUTH_EXTRA_HEADERS
     if [ -n "$JOURNEYS_JSON" ]; then
         local jc
         jc=$(node -e 'console.log(JSON.parse(process.argv[1]).length)' "$JOURNEYS_JSON" 2>/dev/null || echo "?")

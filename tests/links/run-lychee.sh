@@ -14,27 +14,30 @@ if [ -s /reports/auth-urls.txt ]; then
   INPUT="/reports/auth-urls.txt"
 fi
 
-COOKIE_HEADER=""
+# 累加所有 auth header，cookie-based 與 token-based 系統都支援
+AUTH_ARGS=""
 if [ -s /reports/auth-cookie-header.txt ]; then
   COOKIE_HEADER="$(cat /reports/auth-cookie-header.txt)"
-  [ -n "$COOKIE_HEADER" ] && echo "Lychee: using same-job authenticated Cookie header"
+  if [ -n "$COOKIE_HEADER" ]; then
+    echo "Lychee: using same-job authenticated Cookie header"
+    AUTH_ARGS="$AUTH_ARGS --header $(printf %q "Cookie: $COOKIE_HEADER")"
+  fi
+fi
+if [ -s /reports/auth-extra-headers.txt ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    case "$line" in \#*) continue ;; esac
+    case "$line" in *:*) ;; *) continue ;; esac
+    AUTH_ARGS="$AUTH_ARGS --header $(printf %q "$line")"
+    echo "Lychee: forwarding header → ${line%%:*}"
+  done < /reports/auth-extra-headers.txt
 fi
 
-if [ -n "$COOKIE_HEADER" ]; then
-  exec lychee \
-    --format json \
-    --output /reports/lychee.json \
-    --no-progress \
-    --timeout "${LYCHEE_TIMEOUT:-15}" \
-    --max-concurrency "${LYCHEE_MAX_CONCURRENCY:-4}" \
-    --header "Cookie: $COOKIE_HEADER" \
-    "$INPUT"
-fi
-
-exec lychee \
+eval exec lychee \
   --format json \
   --output /reports/lychee.json \
   --no-progress \
   --timeout "${LYCHEE_TIMEOUT:-15}" \
   --max-concurrency "${LYCHEE_MAX_CONCURRENCY:-4}" \
-  "$INPUT"
+  $AUTH_ARGS \
+  $(printf %q "$INPUT")

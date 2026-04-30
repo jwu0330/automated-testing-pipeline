@@ -31,6 +31,15 @@ const TOTAL_VUS = parseInt(__ENV.K6_VUS || '10', 10);
 const DURATION = __ENV.K6_DURATION || '30s';
 const AUTH_COOKIE_HEADER = __ENV.AUTH_COOKIE_HEADER || '';
 
+// AUTH_EXTRA_HEADERS：JSON object，例如 {"Authorization":"Bearer xxx","X-Admin-Token":"yyy"}
+// 給 token-based 系統用，與 cookie 同步注入
+let AUTH_EXTRA_HEADERS = {};
+try {
+  if (__ENV.AUTH_EXTRA_HEADERS) AUTH_EXTRA_HEADERS = JSON.parse(__ENV.AUTH_EXTRA_HEADERS);
+} catch (e) {
+  console.error(`AUTH_EXTRA_HEADERS 解析失敗：${e.message}`);
+}
+
 // ─── 解析 journeys ────────────────────────────────────────────
 function parseJourneys() {
   const raw = __ENV.JOURNEYS_JSON;
@@ -132,6 +141,7 @@ export default function () {
   }
   const baseHeaders = {
     ...(journey.auth && AUTH_COOKIE_HEADER ? { Cookie: AUTH_COOKIE_HEADER } : {}),
+    ...(journey.auth ? AUTH_EXTRA_HEADERS : {}),
     ...(journey.headers || {}),
   };
 

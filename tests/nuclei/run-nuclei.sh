@@ -14,39 +14,41 @@ if [ -s /reports/auth-urls.txt ]; then
   USE_AUTH_LIST=1
 fi
 
-COOKIE_HEADER=""
+# 收集所有 auth header — 同時支援 cookie-based 與 token-based 系統
+AUTH_ARGS=""
 if [ -s /reports/auth-cookie-header.txt ]; then
   COOKIE_HEADER="$(cat /reports/auth-cookie-header.txt)"
   if [ -n "$COOKIE_HEADER" ]; then
     echo "Nuclei: using same-job authenticated Cookie header"
+    AUTH_ARGS="$AUTH_ARGS -H \"Cookie: $COOKIE_HEADER\""
   fi
+fi
+# auth-extra-headers.txt：每行 「Name: Value」 — Authorization / X-Admin-Token 等
+if [ -s /reports/auth-extra-headers.txt ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    # 跳過註解與不含冒號的爛行
+    case "$line" in \#*) continue ;; esac
+    case "$line" in *:*) ;; *) continue ;; esac
+    # shell 安全：用 printf %q 轉成可重新解析的字串
+    AUTH_ARGS="$AUTH_ARGS -H $(printf %q "$line")"
+    echo "Nuclei: forwarding header → ${line%%:*}"
+  done < /reports/auth-extra-headers.txt
 fi
 
 run_nuclei() {
   if [ "$USE_AUTH_LIST" = "1" ]; then
-    nuclei -list /reports/auth-urls.txt "$@"
+    eval nuclei -list /reports/auth-urls.txt "$AUTH_ARGS" "$@"
   else
-    nuclei -target "$TARGET_URL" "$@"
+    eval nuclei -target "$TARGET_URL" "$AUTH_ARGS" "$@"
   fi
 }
 
-if [ -n "$COOKIE_HEADER" ]; then
-  run_nuclei \
-    -H "Cookie: $COOKIE_HEADER" \
-    -jsonl-export /reports/nuclei.jsonl \
-    -severity "${NUCLEI_SEVERITY:-critical,high,medium}" \
-    -rate-limit "${NUCLEI_RATE_LIMIT:-50}" \
-    -stats-interval 10 \
-    -no-color \
-    -silent \
-    || echo "nuclei exit $?"
-else
-  run_nuclei \
-    -jsonl-export /reports/nuclei.jsonl \
-    -severity "${NUCLEI_SEVERITY:-critical,high,medium}" \
-    -rate-limit "${NUCLEI_RATE_LIMIT:-50}" \
-    -stats-interval 10 \
-    -no-color \
-    -silent \
-    || echo "nuclei exit $?"
-fi
+run_nuclei \
+  -jsonl-export /reports/nuclei.jsonl \
+  -severity "${NUCLEI_SEVERITY:-critical,high,medium}" \
+  -rate-limit "${NUCLEI_RATE_LIMIT:-50}" \
+  -stats-interval 10 \
+  -no-color \
+  -silent \
+  || echo "nuclei exit $?"

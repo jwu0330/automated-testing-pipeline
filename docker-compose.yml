@@ -56,6 +56,7 @@ services:
       - K6_DURATION=${K6_DURATION:-30s}
       - JOURNEYS_JSON=${JOURNEYS_JSON:-}
       - AUTH_COOKIE_HEADER=${AUTH_COOKIE_HEADER:-}
+      - AUTH_EXTRA_HEADERS=${AUTH_EXTRA_HEADERS:-}
     command: >
       run /scripts/load-test.js
         --out json=/reports/k6-results.json
