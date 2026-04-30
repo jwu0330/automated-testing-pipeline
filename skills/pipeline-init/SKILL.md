@@ -63,9 +63,9 @@ Verify **via the chosen env** (don't `test -f` locally if `ENV=win-with-wsl`):
 
 ```bash
 # ENV=wsl / native:
-test -f "$PIPELINE_HOME/scripts/run-project.sh" && echo ok
+test -f "$PIPELINE_HOME/tests/scripts/run-project.sh" && echo ok
 # ENV=win-with-wsl:
-wsl.exe bash -c "test -f '$PIPELINE_HOME/scripts/run-project.sh' && echo ok"
+wsl.exe bash -c "test -f '$PIPELINE_HOME/tests/scripts/run-project.sh' && echo ok"
 ```
 
 If the pipeline isn't there, stop and tell the user how to get it (`git clone git@github.com:jwu0330/automated-testing-pipeline.git` **inside WSL**, into a path under `/mnt/e/` or `~/`). **Don't clone for them.**
@@ -201,10 +201,10 @@ Use the env-aware helper from Step 0. **Always pass the WSL-style `/mnt/...` pat
 
 ```bash
 # ENV=wsl / native:
-bash "$PIPELINE_HOME/scripts/register-project.sh" "<name>" "<wsl-path>"
+bash "$PIPELINE_HOME/tests/scripts/register-project.sh" "<name>" "<wsl-path>"
 
 # ENV=win-with-wsl:
-wsl.exe bash -c "bash '$PIPELINE_HOME/scripts/register-project.sh' '<name>' '<wsl-path>'"
+wsl.exe bash -c "bash '$PIPELINE_HOME/tests/scripts/register-project.sh' '<name>' '<wsl-path>'"
 ```
 
 Verify (same env-aware pattern):

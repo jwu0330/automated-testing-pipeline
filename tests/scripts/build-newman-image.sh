@@ -3,12 +3,12 @@
 # build-newman-image.sh — 建置 Newman docker 映像
 #
 # 用法：
-#   bash scripts/build-newman-image.sh
+#   bash tests/scripts/build-newman-image.sh
 #
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 IMAGE_NAME="testing-pipeline-newman"

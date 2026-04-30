@@ -17,7 +17,7 @@
 | **必填欄位** | `testing.yml` 只需 4 個欄位 | 其餘走智慧預設 |
 | **測試碼位置** | `.testing/e2e/` 與 `.testing/api/` 在**專案**裡 | pipeline 只 bind mount，不持有副本 |
 | **單元測試** | 由專案自己的測試資料夾管理（不在 `.testing/`） | pipeline 只跑黑箱／行為測試 |
-| **執行入口** | `bash scripts/run-project.sh <name>` | 單一指令 |
+| **執行入口** | `bash tests/scripts/run-project.sh <name>` | 單一指令 |
 
 ---
 
@@ -171,20 +171,20 @@ project:
 EOF
 
 # 2. 註冊到 pipeline
-bash /path/to/pipeline/scripts/register-project.sh new_project "$(pwd)"
+bash /path/to/pipeline/tests/scripts/register-project.sh new_project "$(pwd)"
 
 # 3. 跑
-bash /path/to/pipeline/scripts/run-project.sh new_project
+bash /path/to/pipeline/tests/scripts/run-project.sh new_project
 ```
 
 ### 7.2 指定測試類型
 
 ```bash
-bash scripts/run-project.sh <name>             # 全部
-bash scripts/run-project.sh <name> ssl         # 只 SSL
-bash scripts/run-project.sh <name> api-test    # 只 API
-bash scripts/run-project.sh <name> e2e         # 只 E2E
-bash scripts/run-project.sh <name> summary     # 只重新產生 report.md
+bash tests/scripts/run-project.sh <name>             # 全部
+bash tests/scripts/run-project.sh <name> ssl         # 只 SSL
+bash tests/scripts/run-project.sh <name> api-test    # 只 API
+bash tests/scripts/run-project.sh <name> e2e         # 只 E2E
+bash tests/scripts/run-project.sh <name> summary     # 只重新產生 report.md
 ```
 
 ---
@@ -211,11 +211,11 @@ automated-testing-pipeline/reports/<project>/
 
 - [ ] 在專案根目錄建 `.testing/` 資料夾
 - [ ] 建 `.testing/testing.yml`（4 個必填）
-- [ ] `bash scripts/register-project.sh <name> <path>`
-- [ ] 驗證：`bash scripts/run-project.sh <name> ssl`
+- [ ] `bash tests/scripts/register-project.sh <name> <path>`
+- [ ] 驗證：`bash tests/scripts/run-project.sh <name> ssl`
 - [ ] 若要 API 測試：在 `.testing/api/collections/` 放 `*.postman_collection.json`，並在 `.testing/.env` 填 `ADMIN_*` / `USER*_*` 帳密
 - [ ] 若要 e2e：在 `.testing/e2e/` 放 `package.json` + `playwright.config.ts` + `tests/*.spec.ts`
-- [ ] 跑全套：`bash scripts/run-project.sh <name>`
+- [ ] 跑全套：`bash tests/scripts/run-project.sh <name>`
 
 ---
 

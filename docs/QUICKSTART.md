@@ -18,7 +18,7 @@
 1. 一次性：在 pipeline 主機啟 n8n
 2. 每個專案：複製 .testing/ 到專案根、填 4 行設定
 3. (可選) API 測試：把 OpenAPI 規格放進 .testing/api/openapi.yaml
-4. 跑：bash .testing/link.sh   或   bash scripts/run-project.sh <name>
+4. 跑：bash .testing/link.sh   或   bash tests/scripts/run-project.sh <name>
 5. 看：reports/<name>/report.md
 ```
 
@@ -60,7 +60,7 @@ docker compose --profile n8n up -d --build
 
 n8n GUI：<http://localhost:5678>，帳密就是 `.env` 裡那組。
 
-> **n8n 不一定要用**：CLI 直接跑 `bash scripts/run-project.sh <name>` 就可以了。n8n 是給「想用 GUI / Google Sheets 排批次」的場景。
+> **n8n 不一定要用**：CLI 直接跑 `bash tests/scripts/run-project.sh <name>` 就可以了。n8n 是給「想用 GUI / Google Sheets 排批次」的場景。
 
 ---
 
@@ -128,7 +128,7 @@ cp .env.example .env
 # 跑
 bash link.sh         # 跑全部
 # 或只跑 API 測試
-bash <pipeline>/scripts/run-project.sh <name> api-test
+bash <pipeline>/tests/scripts/run-project.sh <name> api-test
 ```
 
 第一次會自動 build 一個 `testing-pipeline-newman` Docker image（內含 `newman` + `openapi-to-postmanv2`），約 1–2 分鐘。
@@ -203,11 +203,11 @@ n8n 容器掛了 host 的 `/var/run/docker.sock` + `/mnt/e`，**只適合單機�
 **Q：怎麼只跑某一項？**
 
 ```bash
-bash scripts/run-project.sh <name> ssl              # 只 SSL
-bash scripts/run-project.sh <name> api-test          # 只 API
-bash scripts/run-project.sh <name> ssl,e2e,api-test  # 多選逗號分隔
-bash scripts/run-project.sh <name> REMOTE_ONLY       # preset：只跑遠端
-bash scripts/run-project.sh <name> LOCAL_ONLY        # preset：只跑本地
+bash tests/scripts/run-project.sh <name> ssl              # 只 SSL
+bash tests/scripts/run-project.sh <name> api-test          # 只 API
+bash tests/scripts/run-project.sh <name> ssl,e2e,api-test  # 多選逗號分隔
+bash tests/scripts/run-project.sh <name> REMOTE_ONLY       # preset：只跑遠端
+bash tests/scripts/run-project.sh <name> LOCAL_ONLY        # preset：只跑本地
 ```
 
 完整 scope 列表見 [run-tests.md §3](./run-tests.md#3-執行通用測試)。
@@ -238,7 +238,7 @@ bash scripts/run-project.sh <name> LOCAL_ONLY        # preset：只跑本地
 1. **如果你之前在用 unit 或 db-test**：把 `.testing/unit/` 內的測試碼搬到專案自己的測試資料夾（例 `tests/`），改在專案自己的 CI 跑。`.testing/unit/fixtures/` 的 SQL 種子若要保留請自行管理。
 2. **如果你想用新的 OpenAPI 流程**：把 OpenAPI 檔放成 `.testing/api/openapi.yaml`，刪掉舊的手寫 collection（也可以保留，pipeline 會優先用 collection）。
 3. **如果你的 testing.yml 寫了 `tests.unit.*`**：可以全部刪掉，pipeline 已忽略。
-4. **重 build n8n image**（這次 Dockerfile 沒改，但 newman image 換了 base）：`bash scripts/build-newman-image.sh`（首次跑 api-test 會自動觸發）。
+4. **重 build n8n image**（這次 Dockerfile 沒改，但 newman image 換了 base）：`bash tests/scripts/build-newman-image.sh`（首次跑 api-test 會自動觸發）。
 
 ### 對應 commit
 

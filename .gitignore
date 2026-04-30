@@ -7,6 +7,9 @@ reports/
 # OpenAPI → Postman collection 自動轉換的暫存產物
 .tmp-collections/
 
+# write-project-config.sh 在 URL-only 模式下產的 ephemeral 設定（無 local_path）
+.tmp-ephemeral/
+
 # bootstrap.sh 自動下載的 vendored 工具（yq 等）
 bin/
 
@@ -27,7 +30,9 @@ tests/e2e/playwright/.cache/
 Thumbs.db
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 
 # Docker

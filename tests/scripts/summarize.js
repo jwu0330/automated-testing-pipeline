@@ -8,7 +8,7 @@
 //   - reports/<project>/report.json  ← 結構化（給 n8n 用）
 //   - reports/<project>/history.jsonl ← 歷史紀錄（append-only）
 //
-// 用法：node scripts/summarize.js <project-name> [--json]
+// 用法：node tests/scripts/summarize.js <project-name> [--json]
 // ════════════════════════════════════════════════════════════════
 const fs = require('fs');
 const path = require('path');
@@ -17,7 +17,7 @@ const args = process.argv.slice(2);
 const project = args.find(a => !a.startsWith('--'));
 const asJson = args.includes('--json');
 if (!project) {
-  console.error('用法：node scripts/summarize.js <project-name> [--json]');
+  console.error('用法：node tests/scripts/summarize.js <project-name> [--json]');
   process.exit(2);
 }
 

@@ -30,8 +30,8 @@
 | Docker | 所有測試都在容器內跑 | `docker --version` |
 | Docker Compose v2 | 跑 SSL / ZAP / k6 / n8n | `docker compose version` |
 | yq（Go 版）| 讀 testing.yml | `yq --version` |
-| bash | 跑 `scripts/run-project.sh` | `bash --version` |
-| node | 跑 `scripts/summarize.js` | `node --version` |
+| bash | 跑 `tests/scripts/run-project.sh` | `bash --version` |
+| node | 跑 `tests/scripts/summarize.js` | `node --version` |
 
 WSL2 上 Docker 通常由 Docker Desktop 提供；yq 可裝到 `~/.local/bin` 避免 sudo。
 
@@ -55,11 +55,11 @@ CLI 跑測試的話可略過這步。
 ```bash
 # 1. 在專案根目錄建立 .testing/
 mkdir -p /path/to/your-project/.testing
-cp scripts/testing-yml-template.yml /path/to/your-project/.testing/testing.yml
+cp tests/scripts/testing-yml-template.yml /path/to/your-project/.testing/testing.yml
 # 編輯 testing.yml 設定 target_url, php_version 等
 
 # 2. 註冊到 projects.registry.yml
-bash scripts/register-project.sh your-project /path/to/your-project
+bash tests/scripts/register-project.sh your-project /path/to/your-project
 ```
 
 完整規範見 [project-convention.md](./project-convention.md)。
@@ -68,7 +68,7 @@ bash scripts/register-project.sh your-project /path/to/your-project
 
 ## 3. 執行通用測試
 
-通用測試的指令格式：`bash scripts/run-project.sh <project> <scope>`
+通用測試的指令格式：`bash tests/scripts/run-project.sh <project> <scope>`
 
 | scope | 工具 | 說明 |
 |---|---|---|
@@ -94,11 +94,11 @@ bash scripts/register-project.sh your-project /path/to/your-project
 範例：
 
 ```bash
-bash scripts/run-project.sh babydodofun ssl              # 只跑 SSL
-bash scripts/run-project.sh babydodofun                  # 全部測試 + 評分卡
-bash scripts/run-project.sh babydodofun ssl,e2e,lighthouse  # 逗號分隔多選
-bash scripts/run-project.sh babydodofun REMOTE_ONLY      # preset：只跑遠端
-bash scripts/run-project.sh babydodofun LOCAL_ONLY       # preset：只跑本地
+bash tests/scripts/run-project.sh babydodofun ssl              # 只跑 SSL
+bash tests/scripts/run-project.sh babydodofun                  # 全部測試 + 評分卡
+bash tests/scripts/run-project.sh babydodofun ssl,e2e,lighthouse  # 逗號分隔多選
+bash tests/scripts/run-project.sh babydodofun REMOTE_ONLY      # preset：只跑遠端
+bash tests/scripts/run-project.sh babydodofun LOCAL_ONLY       # preset：只跑本地
 ```
 
 ### 3.1 Scope 逗號分隔與 Preset（v0.5+）
@@ -177,7 +177,7 @@ Sheet 規範與欄位見 [google-sheets-schema.md](./google-sheets-schema.md)。
 - **關鍵步驟 stopWorkflow**：05 寫設定失敗、07 註冊失敗會直接停（避免下游在錯資料上跑）；08~23 測試節點和 24 Scorecard 用 `continueRegularOutput` 容忍部分測試失敗
 - **警告不致命**：03 Precheck 僅在 `project_name` / `target_url` 空時 throw；其他缺欄位只記 warning 並從 scope list 移除對應測試
 - **多身分迴圈在 bash 內**：`run-project.sh` 內部對 `api-test` / `auth-test` 會把 `ADMIN_*` / `USER1_*..USER5_*` 各跑一輪，產生 `newman-junit-<id>.xml`；其他測試（ssl/security/nuclei/stress/lighthouse/...）一律跑一次
-- **ephemeral 模式**：`local_path` 空或不存在時，`write-project-config.sh` 會寫到 `<pipeline>/.testing/ephemeral/<name>/`，pipeline 能對純網域站（無本地原始碼）跑測試
+- **ephemeral 模式**：`local_path` 空或不存在時，`write-project-config.sh` 會寫到 `<pipeline>/.tmp-ephemeral/<name>/`，pipeline 能對純網域站（無本地原始碼）跑測試
 - **單頁 Form + Sheet Filter 架構**：01 Form 的 `projectPick` dropdown 選項**寫死**在 workflow JSON 裡（不動態讀 Sheet），02 Sheet 用 `filtersUI` 把 `project_name` 比對 `{{ projectPick }}` 只讀選中那列。這個設計是因為 n8n `formTrigger` 在 Form 渲染前無法先讀 Sheet；試過「多頁 Form（Trigger→Sheet→Code→Form）」但 n8n GUI 會把多頁欄位合併顯示、動態 `fieldOptions` 拿不到資料。代價：**新增 Sheet 列時要同步改 01 節點的 `fieldOptions.values`**。
 
 ### 首次設定
@@ -314,7 +314,7 @@ cp -r /mnt/e/Code/github/automated-testing-pipeline/tests/e2e/* \
 #### 4.2.3 執行
 
 ```bash
-bash scripts/run-project.sh <project> e2e
+bash tests/scripts/run-project.sh <project> e2e
 ```
 
 首次會 pull `mcr.microsoft.com/playwright:v1.59.1-noble`（約 2 GB，一次）。後續每次跑 `npm install` 約 30 秒 + 測試本身。
@@ -411,11 +411,11 @@ if (role === 'admin') {
 #### 4.3.4 執行
 
 ```bash
-bash scripts/run-project.sh <project> api-test       # 跑所有身分輪
-bash scripts/run-project.sh <project> auth-test      # 同上（n8n alias）
+bash tests/scripts/run-project.sh <project> api-test       # 跑所有身分輪
+bash tests/scripts/run-project.sh <project> auth-test      # 同上（n8n alias）
 ```
 
-首次會從 `scripts/build-newman-image.sh` 建 `testing-pipeline-newman:latest`（Newman 6.x + 內建 junit reporter）。
+首次會從 `tests/scripts/build-newman-image.sh` 建 `testing-pipeline-newman:latest`（Newman 6.x + 內建 junit reporter）。
 
 #### 4.3.5 報告
 
@@ -445,7 +445,7 @@ reports/<project>/raw/
 補 ZAP baseline 抓不到的 CVE / 錯誤配置 / 洩漏端點。用 ProjectDiscovery 模板引擎。
 
 ```bash
-bash scripts/run-project.sh <project> nuclei
+bash tests/scripts/run-project.sh <project> nuclei
 ```
 
 設定（`testing.yml` 可選）：
@@ -464,7 +464,7 @@ tests:
 Core Web Vitals / A11y / Best Practices / SEO 四項分數 + LCP / CLS / TBT 指標。
 
 ```bash
-bash scripts/run-project.sh <project> lighthouse
+bash tests/scripts/run-project.sh <project> lighthouse
 ```
 
 設定：
@@ -483,7 +483,7 @@ tests:
 注入 gremlins.js 做隨機點擊/打字/滾動，監聽 `pageerror` 未捕獲例外。**抓 E2E spec 寫不到的邊界 bug**。
 
 ```bash
-bash scripts/run-project.sh <project> monkey
+bash tests/scripts/run-project.sh <project> monkey
 ```
 
 設定：
@@ -503,7 +503,7 @@ tests:
 同時掃 **依賴 CVE / 洩漏 secret / 錯誤配置** 三類。需要 `local_path`。
 
 ```bash
-bash scripts/run-project.sh <project> trivy
+bash tests/scripts/run-project.sh <project> trivy
 ```
 
 設定：
@@ -522,7 +522,7 @@ tests:
 Rust 寫的超快連結檢查器，驗證頁面上所有 `<a>` / `<img>` / `<script>` 是否可達。
 
 ```bash
-bash scripts/run-project.sh <project> links
+bash tests/scripts/run-project.sh <project> links
 ```
 
 設定：
@@ -543,9 +543,9 @@ tests:
 ### 5.1 統一報告（建議的總覽）
 
 ```bash
-bash scripts/run-project.sh <project> summary
+bash tests/scripts/run-project.sh <project> summary
 # 或跑全套時最後會自動產：
-bash scripts/run-project.sh <project>
+bash tests/scripts/run-project.sh <project>
 ```
 
 兩份一起產：
@@ -610,7 +610,7 @@ A: 常見於升版 `@playwright/test` 之後。刪掉 lockfile 重跑：
 ```bash
 rm <project>/.testing/e2e/package-lock.json
 rm -rf <project>/.testing/e2e/node_modules
-bash scripts/run-project.sh <project> e2e
+bash tests/scripts/run-project.sh <project> e2e
 ```
 
 ### Q: Playwright 報「Executable doesn't exist at ...」

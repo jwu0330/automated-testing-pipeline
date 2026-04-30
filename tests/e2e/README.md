@@ -1,6 +1,6 @@
 # Playwright E2E 通用骨架
 
-本目錄是 **流水線提供的通用 Playwright 範本**，不會直接被 `scripts/run-project.sh` 執行。
+本目錄是 **流水線提供的通用 Playwright 範本**，不會直接被 `tests/scripts/run-project.sh` 執行。
 
 ## 用途
 

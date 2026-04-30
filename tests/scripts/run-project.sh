@@ -3,7 +3,7 @@
 # run-project.sh — 對指定專案執行測試（schema v2）
 #
 # 用法：
-#   bash scripts/run-project.sh <name> [scope]
+#   bash tests/scripts/run-project.sh <name> [scope]
 #
 # scope:
 #   all (預設) | ssl | security | stress | static | e2e
@@ -27,7 +27,7 @@ NAME="${1:-}"
 SCOPE="${2:-all}"
 
 if [ -z "$NAME" ]; then
-    echo "用法：bash scripts/run-project.sh <name> [scope]"
+    echo "用法：bash tests/scripts/run-project.sh <name> [scope]"
     echo ""
     echo "scope 可以是："
     echo "  Preset：all | remote-only | local-only"
@@ -38,13 +38,13 @@ if [ -z "$NAME" ]; then
     exit 1
 fi
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 REGISTRY="$ROOT/projects.registry.yml"
 
 # 自動補齊 yq（host 只需要 Docker）
-source "$ROOT/scripts/lib/bootstrap.sh"
+source "$ROOT/tests/scripts/lib/bootstrap.sh"
 
 [ -f "$REGISTRY" ] || { echo "❌ 找不到 $REGISTRY，請先 register-project.sh"; exit 1; }
 
@@ -132,8 +132,8 @@ export REPORTS_RAW_DIR="$REPORTS_RAW"  # docker-compose volumes 用
 
 # ─── 報告輪替：每次開跑前把超過 REPORTS_KEEP_DAYS 天的舊報告打包進 archive/
 #     關閉方式：REPORTS_KEEP_DAYS=0（或 export REPORTS_NO_ROTATE=1）
-if [ "${REPORTS_NO_ROTATE:-0}" != "1" ] && [ -x "$ROOT/scripts/rotate-reports.sh" ]; then
-    bash "$ROOT/scripts/rotate-reports.sh" "$NAME" "${REPORTS_KEEP_DAYS:-30}" || true
+if [ "${REPORTS_NO_ROTATE:-0}" != "1" ] && [ -x "$ROOT/tests/scripts/rotate-reports.sh" ]; then
+    bash "$ROOT/tests/scripts/rotate-reports.sh" "$NAME" "${REPORTS_KEEP_DAYS:-30}" || true
 fi
 
 echo "╔══════════════════════════════════════════════════╗"
@@ -479,7 +479,7 @@ run_api_test() {
         # 確保 newman + openapi-to-postmanv2 image 已建置
         if ! docker image inspect testing-pipeline-newman:latest >/dev/null 2>&1; then
             echo "    首次建置 testing-pipeline-newman..."
-            bash "$ROOT/scripts/build-newman-image.sh" || true
+            bash "$ROOT/tests/scripts/build-newman-image.sh" || true
         fi
         local gen_dir="$ROOT/.tmp-collections"
         mkdir -p "$gen_dir"
@@ -652,7 +652,7 @@ run_summary() {
     echo "▶ 15 Report - Parse Results"
     echo "▶ 16 Report - Generate Scorecard"
     echo "──────────────────────────────────────────"
-    node_run "$ROOT/scripts/summarize.js" "$NAME"
+    node_run "$ROOT/tests/scripts/summarize.js" "$NAME"
 }
 
 # ─── Preset 展開：ALL / REMOTE_ONLY / LOCAL_ONLY → 具體 scope 列表 ────

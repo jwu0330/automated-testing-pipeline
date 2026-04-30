@@ -43,7 +43,7 @@
 │               │                                          │
 │               ▼                                          │
 │  ┌─────────────────────────────────────┐                │
-│  │  scripts/run-project.sh             │                │
+│  │  tests/scripts/run-project.sh             │                │
 │  │   ├─ 讀 projects.registry.yml       │                │
 │  │   ├─ 讀 <project>/.testing/testing.yml           │  │
 │  │   └─ 依設定執行下列 docker 容器     │                │
@@ -73,64 +73,52 @@
 ```text
 automated-testing-pipeline/
 ├── README.md                      # 本文件
-├── docker-compose.yml             # 所有服務定義（含 n8n）
+├── docker-compose.yml             # 所有 docker service 定義
 ├── Dockerfile                     # testssl 自訂映像
-├── .env / .env.example            # 環境變數
+├── .env / .env.example            # 環境變數（SMTP、預設值）
 ├── projects.registry.yml          # 客戶專案註冊表（gitignore）
 ├── projects.registry.example.yml  # 註冊表範本
 │
-├── .testing/                      # ★ 專案導入工具包（可整包複製到客戶專案）
-│   ├── README.md                  #   唯一說明文件（必要 / 可選）
-│   ├── testing.yml                #   4 個必填欄位範本
-│   ├── link.sh                    #   一鍵連結 + 跑完整流程
-│   ├── .env.example               #   可選：專案敏感值範本
-│   └── {e2e,api,static,ssl,security,stress,lighthouse,nuclei,hooks,scripts}/
-│                                  #   10 個可選客製資料夾（預設空 .gitkeep）
+├── tests/                         # 測試引擎（orchestration + per-tool）
+│   ├── scripts/                   # ★ 主腦：orchestration 腳本
+│   │   ├── run-project.sh         #   對指定專案跑測試（核心）
+│   │   ├── register-project.sh    #   註冊專案
+│   │   ├── write-project-config.sh#   產 testing.yml + .env
+│   │   ├── rotate-reports.sh      #   報告輪替
+│   │   ├── summarize.js           #   彙整成 report.md
+│   │   ├── testing-yml-template.yml
+│   │   ├── env.example
+│   │   └── lib/bootstrap.sh       #   自動補 yq / node_run wrapper
+│   ├── ssl/                       # testssl.sh 設定
+│   ├── security/                  # ZAP 由 compose 驅動
+│   ├── nuclei/                    # Nuclei 由 compose 驅動
+│   ├── stress/load-test.js        # k6 腳本
+│   ├── lighthouse/                # Lighthouse（Dockerfile + 腳本）
+│   ├── links/                     # Lychee 由 compose 驅動
+│   ├── static/phpstan.neon.dist   # 通用 PHPStan 設定
+│   ├── trivy/                     # Trivy 由 run-project.sh docker run
+│   ├── api/                       # Newman / Postman 測試骨架
+│   ├── e2e/                       # Playwright 通用骨架
+│   └── monkey/                    # Gremlins.js monkey 測試骨架
 │
-├── scripts/
-│   ├── run-all.sh                 # 舊有：跑 compose 的全部 profile
-│   ├── run-project.sh             # ★ 新：對指定專案跑測試
-│   ├── register-project.sh        # ★ 新：註冊專案
-│   └── testing-yml-template.yml   # ★ testing.yml 範本
+├── skills/                        # ★ 介面 1：Claude Code Slash Commands
+│   ├── pipeline-init/             #   情境 A：初始化專案接入
+│   ├── pipeline-run/              #   情境 A：跑測試
+│   └── pipeline-quick-test/       #   情境 B：一次性 review 別人網站
 │
-├── n8n/
-│   ├── Dockerfile                 # n8n + docker-cli + yq
-│   └── workflows/
-│       ├── README.md
-│       └── pipeline-skeleton.json # ★ 可匯入的 workflow
+├── ui/                            # ★ 介面 2：一頁式 Web UI（外部使用者）
+│   ├── server.js                  #   Node http server（零 npm 依賴）
+│   ├── index.html / app.js / style.css
+│   └── .runtime/                  #   執行期 lock + jobs（gitignore）
 │
-├── tests/
-│   ├── ssl/run-testssl.sh         # 通用 SSL 腳本
-│   ├── security/                  # ZAP 由 compose 直接驅動
-│   ├── nuclei/                    # ★ Nuclei 由 compose 直接驅動
-│   ├── stress/load-test.js        # 通用 k6 腳本
-│   ├── lighthouse/                # ★ Lighthouse（Dockerfile + run script）
-│   │   ├── Dockerfile
-│   │   └── lighthouse-run.sh
-│   ├── links/                     # ★ Lychee 由 compose 直接驅動
-│   ├── static/phpstan.neon.dist   # ★ 通用 PHPStan 設定
-│   ├── trivy/                     # ★ Trivy 由 run-project.sh 直接 docker run
-│   ├── api/                       # ★ Newman / Postman API 測試骨架
-│   │   ├── Dockerfile
-│   │   ├── collections/
-│   │   └── postman/run-newman.sh
-│   ├── e2e/                       # ★ Playwright 通用骨架
-│   │   ├── package.json
-│   │   ├── playwright.config.ts
-│   │   └── tests/smoke.spec.ts
-│   └── monkey/                    # ★ Gremlins.js monkey 測試骨架
-│       ├── package.json
-│       ├── playwright.config.ts
-│       └── tests/gremlins.spec.ts
-│
-├── docs/
-│   ├── setup.md                   # 舊有環境安裝步驟
-│   ├── project-convention.md      # ★ 專案測試規範（核心文件）
-│   └── run-tests.md               # ★ 操作手冊（骨架，待填）
-│
-└── reports/                       # 每個專案一個子目錄
-    └── <project-name>/
+└── docs/                          # 設計文件
+    ├── QUICKSTART.md
+    ├── project-convention.md      # 客戶專案 .testing/ 規範
+    ├── run-tests.md
+    └── setup.md
 ```
+
+> 報告寫進客戶專案的 `<project>/.testing/reports/`（情境 A），或 pipeline 端的 `.tmp-reports/<name>/`（情境 B、C，gitignore）。
 
 ---
 
@@ -172,9 +160,9 @@ done
 ### CLI 直接操作（給沒裝 Claude Code 的人）
 
 ```bash
-bash scripts/register-project.sh <name> <absolute-path>
-bash scripts/run-project.sh <name>            # 全部測試
-bash scripts/run-project.sh <name> ssl,e2e    # 多選
+bash tests/scripts/register-project.sh <name> <absolute-path>
+bash tests/scripts/run-project.sh <name>            # 全部測試
+bash tests/scripts/run-project.sh <name> ssl,e2e    # 多選
 ```
 
 完整 scope：`all | ssl | security | stress | static | e2e | api-test | nuclei | lighthouse | monkey | trivy | links | summary`
@@ -202,7 +190,6 @@ PORT=3000 node ui/server.js
 
 - **[`skills/README.md`](./skills/README.md)** ★ **從這裡開始** — 三個 skill 的使用方式
 - [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) — 15 分鐘上手 CLI 流程
-- [`.testing/README.md`](./.testing/README.md) — `.testing/` kit 結構與必要 / 可選欄位
 - [docs/project-convention.md](./docs/project-convention.md) — 專案測試規範
 - [docs/run-tests.md](./docs/run-tests.md) — 操作手冊
 - [docs/architecture-parallel-reporting.md](./docs/architecture-parallel-reporting.md) — 三路並行設計、報告安全驗證

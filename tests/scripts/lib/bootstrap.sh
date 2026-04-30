@@ -7,13 +7,13 @@
 #   - node 缺：定義 node_run() 走 docker（node:22-slim）
 #
 # 使用方式（在其他 script 開頭）：
-#   ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-#   source "$ROOT/scripts/lib/bootstrap.sh"
+#   ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+#   source "$ROOT/tests/scripts/lib/bootstrap.sh"
 # ════════════════════════════════════════════════════════════════
 
-# 呼叫端應已定義 ROOT；保險起見再算一次
+# 呼叫端應已定義 ROOT；保險起見再算一次（lib/ 在 tests/scripts/lib/，往上 3 層 = ROOT）
 if [ -z "${ROOT:-}" ]; then
-    ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 fi
 
 PIPELINE_BIN="$ROOT/bin"

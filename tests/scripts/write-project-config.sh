@@ -3,12 +3,12 @@
 # write-project-config.sh — 由 n8n 動態寫入專案的 testing.yml 和 .env
 #
 # 用法：
-#   bash scripts/write-project-config.sh \
+#   bash tests/scripts/write-project-config.sh \
 #       <name> <local_path> <target_url> <php_version> [env_b64]
 #
 # 行為：
 #   - local_path 為有效目錄 → 寫到 <local_path>/.testing/testing.yml + .env
-#   - local_path 空或不存在 → 寫到 <ROOT>/.testing/ephemeral/<name>/testing.yml
+#   - local_path 空或不存在 → 寫到 <ROOT>/.tmp-ephemeral/<name>/testing.yml
 #     （registry 需指向 ephemeral 路徑；由 register-project.sh 處理）
 #   - env_b64 為 base64 編碼的 .env 檔完整內容（選填）
 #
@@ -24,14 +24,14 @@ PHP_VERSION="${4:-8.1}"
 ENV_B64="${5:-}"
 
 if [ -z "$NAME" ] || [ -z "$TARGET_URL" ]; then
-    echo "用法：bash scripts/write-project-config.sh <name> <local_path> <target_url> [php_version] [env_b64]" >&2
+    echo "用法：bash tests/scripts/write-project-config.sh <name> <local_path> <target_url> [php_version] [env_b64]" >&2
     exit 1
 fi
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # 自動補齊 yq（host 只需要 Docker）
-source "$ROOT/scripts/lib/bootstrap.sh"
+source "$ROOT/tests/scripts/lib/bootstrap.sh"
 
 # ─── 決定寫入目錄：有效 local_path → 真專案；否則 → ephemeral ──
 # 不論模式，最終目錄結構都是 <registry_path>/.testing/testing.yml
@@ -41,7 +41,7 @@ if [ -n "$LOCAL_PATH" ] && [ -d "$LOCAL_PATH" ]; then
     MODE="project"
     EFFECTIVE_LOCAL_PATH="$LOCAL_PATH"
 else
-    REGISTRY_PATH="$ROOT/.testing/ephemeral/$NAME"
+    REGISTRY_PATH="$ROOT/.tmp-ephemeral/$NAME"
     MODE="ephemeral"
     EFFECTIVE_LOCAL_PATH=""   # ephemeral 一律 URL-only
     [ -n "$LOCAL_PATH" ] && echo "⚠️  local_path 不存在：$LOCAL_PATH → 寫入 ephemeral" >&2
@@ -75,7 +75,7 @@ fi
 
 # ─── ephemeral 清理：刪 7 天前沒動過的 ──
 if [ "$MODE" = "ephemeral" ]; then
-    EPHEMERAL_ROOT="$ROOT/.testing/ephemeral"
+    EPHEMERAL_ROOT="$ROOT/.tmp-ephemeral"
     find "$EPHEMERAL_ROOT" -maxdepth 1 -mindepth 1 -type d -mtime +7 \
         -not -path "$CONFIG_DIR" \
         -exec rm -rf {} \; 2>/dev/null || true

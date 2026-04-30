@@ -8,7 +8,7 @@
 //
 // 行為：
 //   - 單人鎖：同時只允許 1 個任務執行（檔案鎖 + PID 探活）
-//   - 表單送出 → 註冊暫時專案 → bash scripts/run-project.sh → SSE 串流 log
+//   - 表單送出 → 註冊暫時專案 → bash tests/scripts/run-project.sh → SSE 串流 log
 //   - 跑完把 reports/ 打包成 .tgz 供下載
 // ════════════════════════════════════════════════════════════════
 const http = require('http');
@@ -23,6 +23,25 @@ const UI_DIR = __dirname;
 const RUNTIME = path.join(UI_DIR, '.runtime');
 const JOBS = path.join(RUNTIME, 'jobs');
 const LOCK = path.join(RUNTIME, 'lock');
+
+// 零依賴載入 .env（流水線根目錄）：KEY=VALUE，支援 # 註解、單/雙引號
+(() => {
+  const envFile = path.join(ROOT, '.env');
+  if (!fs.existsSync(envFile)) return;
+  const txt = fs.readFileSync(envFile, 'utf8');
+  for (const raw of txt.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!m) continue;
+    let v = m[2];
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    if (!(m[1] in process.env)) process.env[m[1]] = v;
+  }
+})();
+
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const IS_WIN = process.platform === 'win32';
 
@@ -253,7 +272,7 @@ tests: {}
   };
 
   // ① register-project.sh
-  const reg = spawnBash(path.join(ROOT, 'scripts', 'register-project.sh'), [projectName, projectPathBash], {
+  const reg = spawnBash(path.join(ROOT, 'tests', 'scripts', 'register-project.sh'), [projectName, projectPathBash], {
     cwd: ROOT, env: process.env,
   });
   reg.stdout.on('data', d => writeLog(d.toString()));
@@ -264,8 +283,8 @@ tests: {}
     if (code !== 0) { finish(code, null); return; }
 
     // ② run-project.sh
-    writeLog(`\n[ui] $ bash scripts/run-project.sh ${projectName} ${scopeArg}\n`);
-    const child = spawnBash(path.join(ROOT, 'scripts', 'run-project.sh'), [projectName, scopeArg], {
+    writeLog(`\n[ui] $ bash tests/scripts/run-project.sh ${projectName} ${scopeArg}\n`);
+    const child = spawnBash(path.join(ROOT, 'tests', 'scripts', 'run-project.sh'), [projectName, scopeArg], {
       cwd: ROOT, env: process.env,
     });
     child.stdout.on('data', d => writeLog(d.toString()));
@@ -273,29 +292,16 @@ tests: {}
     child.on('error', (e) => { writeLog(`[ui] run spawn error: ${e.message}\n`); finish(127, null); });
     child.on('close', (rcode) => {
       writeLog(`\n[ui] run exit=${rcode}\n`);
-      // run-project.sh 在 local_path 為空時會寫到 .tmp-reports/<name>/
-      const remoteReports = path.join(ROOT, '.tmp-reports', projectName);
-      const targetReports = path.join(jobDir, 'reports');
-      try {
-        if (fs.existsSync(remoteReports)) {
-          const cp = (s, d) => {
-            const st = fs.statSync(s);
-            if (st.isDirectory()) {
-              fs.mkdirSync(d, { recursive: true });
-              for (const e of fs.readdirSync(s)) cp(path.join(s, e), path.join(d, e));
-            } else fs.copyFileSync(s, d);
-          };
-          cp(remoteReports, targetReports);
-          writeLog(`[ui] copied reports → ${targetReports}\n`);
-        } else {
-          writeLog(`[ui] (no reports dir at ${remoteReports})\n`);
-        }
-      } catch (e) {
-        writeLog(`[ui] copy reports failed: ${e.message}\n`);
+      // 報告已直接寫到 <jobDir>/project/.testing/reports/（commit 5fd8339）
+      const targetReports = path.join(projectPath, '.testing', 'reports');
+      if (!fs.existsSync(targetReports)) {
+        writeLog(`[ui] (no reports dir at ${targetReports})\n`);
       }
-      // ③ tar.gz
+      // ③ tar.gz：把 .testing/reports 壓成 reports.tgz 裡的 reports/
       const archive = path.join(jobDir, 'reports.tgz');
-      const tar = spawn('tar', ['-czf', archive, '-C', jobDir, 'reports'], { stdio: 'ignore' });
+      const tar = fs.existsSync(targetReports)
+        ? spawn('tar', ['-czf', archive, '-C', path.dirname(targetReports), 'reports'], { stdio: 'ignore' })
+        : { on: (ev, cb) => { if (ev === 'close') setImmediate(() => cb(1)); } };
       const afterArchive = (archiveOk) => {
         // ④ 寄信（若有填 email）
         if (!email) {

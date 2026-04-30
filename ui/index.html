@@ -4,7 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Automated Testing Pipeline</title>
-<link rel="stylesheet" href="/style.css">
+<script>
+  // 防呆：被 Live Server / 其他靜態伺服器當靜態頁打開時，
+  // /api/run 會 405。偵測到不是預設的 :8080 就自動跳轉。
+  (function () {
+    var p = location.port;
+    if (p && p !== '8080' && (location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+      location.replace('http://' + location.hostname + ':8080/');
+    }
+  })();
+</script>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
@@ -61,11 +71,12 @@
   </form>
 
   <section id="run-panel" hidden>
-    <h2>執行紀錄</h2>
-    <pre id="log"></pre>
-    <a id="download" href="#" hidden download>⬇ 下載報告 (zip)</a>
+    <h2>執行進度</h2>
+    <p id="progress-summary" class="progress-summary">準備中…</p>
+    <ul id="progress-list" class="progress-list"></ul>
+    <button type="button" id="download-btn" class="download-btn" disabled>⬇ 下載報告（測試結束後可下載）</button>
   </section>
 </main>
-<script src="/app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 # rotate-reports.sh — reports 目錄輪替
 #
 # 用法：
-#   bash scripts/rotate-reports.sh <project-name> [keep_days]
+#   bash tests/scripts/rotate-reports.sh <project-name> [keep_days]
 #
 # 行為：
 #   - reports/<project-name>/archive/ 保留最近 N 天（預設 30），舊的刪
@@ -19,11 +19,11 @@ NAME="${1:-}"
 KEEP_DAYS="${2:-30}"
 
 if [ -z "$NAME" ]; then
-    echo "用法：bash scripts/rotate-reports.sh <project-name> [keep_days=30]"
+    echo "用法：bash tests/scripts/rotate-reports.sh <project-name> [keep_days=30]"
     exit 1
 fi
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # 優先使用 run-project.sh 設定的 REPORTS_DIR；否則退回舊路徑（向後相容手動呼叫）
 REPORT_DIR="${REPORTS_DIR:-$ROOT/reports/$NAME}"

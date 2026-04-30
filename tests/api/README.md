@@ -110,10 +110,10 @@ cp /path/to/pipeline/tests/api/collections/api-base.postman_collection.json \
 
 ```bash
 # 方式 A：經由 run-project.sh api-test scope
-bash scripts/run-project.sh your-project api-test
+bash tests/scripts/run-project.sh your-project api-test
 
 # 方式 B：全部測試（包含 api-test）
-bash scripts/run-project.sh your-project
+bash tests/scripts/run-project.sh your-project
 ```
 
 ---

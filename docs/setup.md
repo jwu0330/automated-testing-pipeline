@@ -48,7 +48,7 @@ docker compose --profile e2e up
 ### 5. 執行全部測試
 
 ```bash
-bash scripts/run-all.sh
+bash tests/scripts/run-all.sh
 ```
 
 ### 6. 查看報告

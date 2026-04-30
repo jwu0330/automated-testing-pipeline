@@ -122,24 +122,51 @@ button:disabled { background: #999; cursor: not-allowed; }
 }
 .status.error { color: var(--error); }
 .status.ok { color: var(--ok); }
-pre#log {
-  background: #111;
-  color: #e8e8e8;
-  padding: 1rem;
-  border-radius: 6px;
-  font-size: .82rem;
-  max-height: 480px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
+.progress-summary {
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0 0 .5rem;
 }
-#download {
+.progress-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+.progress-list li {
+  padding: .4rem 0;
+  display: flex;
+  gap: .65rem;
+  align-items: center;
+  font-size: .95rem;
+  color: #888;
+  border-bottom: 1px solid #f0f0f2;
+}
+.progress-list li:last-child { border-bottom: 0; }
+.progress-list .icon {
   display: inline-block;
-  margin-top: 1rem;
+  width: 1.4em;
+  text-align: center;
+}
+.progress-list li.done    { color: var(--ok); }
+.progress-list li.running { color: var(--accent); font-weight: 600; }
+.progress-list li.skipped { color: #aaa; }
+.progress-list li.failed  { color: var(--error); }
+.download-btn {
+  display: inline-block;
+  margin-top: .5rem;
   background: var(--ok);
   color: #fff;
-  padding: .55rem 1.1rem;
+  padding: .6rem 1.2rem;
   border-radius: 5px;
-  text-decoration: none;
+  border: 0;
+  font: inherit;
   font-weight: 600;
+  cursor: pointer;
+}
+.download-btn:hover:not(:disabled) { filter: brightness(1.05); }
+.download-btn:disabled {
+  background: #c8cdd2;
+  color: #fff;
+  cursor: not-allowed;
 }

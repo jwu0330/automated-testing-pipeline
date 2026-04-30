@@ -261,7 +261,7 @@ C6 ─┘
 
 **pipeline 執行**:
 ```bash
-bash scripts/run-project.sh <project> api-test
+bash tests/scripts/run-project.sh <project> api-test
 # 內部：docker run -v .testing/api:/api newman:latest run postman-collection.json ...
 ```
 
@@ -286,7 +286,7 @@ reports/<project>/raw/newman-*.json
 
 **pipeline 執行**:
 ```bash
-bash scripts/run-project.sh <project> db-test
+bash tests/scripts/run-project.sh <project> db-test
 # 內部：執行上述 2 個 shell script，比對預期狀態
 ```
 
@@ -317,7 +317,7 @@ reports/<project>/raw/seed-validation.log
 
 **pipeline 執行**:
 ```bash
-bash scripts/run-project.sh <project> auth-test
+bash tests/scripts/run-project.sh <project> auth-test
 # 內部：newman 執行該 folder
 ```
 
@@ -350,7 +350,7 @@ test('homepage visual snapshot', async ({ page }) => {
 
 **pipeline 執行**:
 ```bash
-bash scripts/run-project.sh <project> visual-test
+bash tests/scripts/run-project.sh <project> visual-test
 # 內部：playwright test --grep @visual
 ```
 
@@ -387,7 +387,7 @@ export default defineConfig({
 
 **pipeline 執行**:
 ```bash
-bash scripts/run-project.sh <project> browser-compat
+bash tests/scripts/run-project.sh <project> browser-compat
 # 內部：playwright test --grep @compat (全 projects)
 ```
 

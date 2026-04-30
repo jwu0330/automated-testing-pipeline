@@ -57,9 +57,9 @@ Verify via the chosen env:
 
 ```bash
 # ENV=wsl / native:
-test -f "$PIPELINE_HOME/scripts/run-project.sh" && echo ok
+test -f "$PIPELINE_HOME/tests/scripts/run-project.sh" && echo ok
 # ENV=win-with-wsl:
-wsl.exe bash -c "test -f '$PIPELINE_HOME/scripts/run-project.sh' && echo ok"
+wsl.exe bash -c "test -f '$PIPELINE_HOME/tests/scripts/run-project.sh' && echo ok"
 ```
 
 ## Step 3 — Verify project is registered
@@ -81,10 +81,10 @@ If empty, register on the fly (use `local_path` from `testing.yml`, which is alr
 
 ```bash
 # ENV=wsl / native:
-bash "$PIPELINE_HOME/scripts/register-project.sh" "$NAME" "$LOCAL_PATH"
+bash "$PIPELINE_HOME/tests/scripts/register-project.sh" "$NAME" "$LOCAL_PATH"
 
 # ENV=win-with-wsl:
-wsl.exe bash -c "bash '$PIPELINE_HOME/scripts/register-project.sh' '$NAME' '$LOCAL_PATH'"
+wsl.exe bash -c "bash '$PIPELINE_HOME/tests/scripts/register-project.sh' '$NAME' '$LOCAL_PATH'"
 ```
 
 ## Step 4 — Decide scope
@@ -110,10 +110,10 @@ Always invoke through the env helper (Docker is in WSL):
 
 ```bash
 # ENV=wsl / native:
-cd "$PIPELINE_HOME" && bash scripts/run-project.sh "$NAME" "$SCOPE"
+cd "$PIPELINE_HOME" && bash tests/scripts/run-project.sh "$NAME" "$SCOPE"
 
 # ENV=win-with-wsl:
-wsl.exe bash -c "cd '$PIPELINE_HOME' && bash scripts/run-project.sh '$NAME' '$SCOPE'"
+wsl.exe bash -c "cd '$PIPELINE_HOME' && bash tests/scripts/run-project.sh '$NAME' '$SCOPE'"
 ```
 
 Stream output. Don't `&` / background — the user wants to see progress.

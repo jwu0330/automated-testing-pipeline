@@ -26,7 +26,7 @@ Find the pipeline in this priority order:
 Verify with:
 
 ```bash
-test -f "$PIPELINE_HOME/scripts/run-project.sh" && echo ok
+test -f "$PIPELINE_HOME/tests/scripts/run-project.sh" && echo ok
 ```
 
 If the pipeline isn't there, stop and tell the user how to get it (`git clone git@github.com:jwu0330/automated-testing-pipeline.git`). **Don't clone for them.**
@@ -141,7 +141,7 @@ If OpenAPI was detected, ensure `.testing/api/` exists (just `mkdir`; don't move
 ## Step 6 — Register the project
 
 ```bash
-bash "$PIPELINE_HOME/scripts/register-project.sh" <name> "<absolute project path>"
+bash "$PIPELINE_HOME/tests/scripts/register-project.sh" <name> "<absolute project path>"
 ```
 
 Verify:

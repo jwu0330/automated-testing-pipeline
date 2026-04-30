@@ -32,7 +32,7 @@ Same priority as `/pipeline-init`:
 Verify:
 
 ```bash
-test -f "$PIPELINE_HOME/scripts/run-project.sh" && echo ok
+test -f "$PIPELINE_HOME/tests/scripts/run-project.sh" && echo ok
 ```
 
 ## Step 3 — Verify project is registered
@@ -45,7 +45,7 @@ yq -r ".projects.${NAME}.path // \"\"" "$PIPELINE_HOME/projects.registry.yml"
 If empty, register on the fly:
 
 ```bash
-bash "$PIPELINE_HOME/scripts/register-project.sh" "$NAME" "$(pwd)"
+bash "$PIPELINE_HOME/tests/scripts/register-project.sh" "$NAME" "$(pwd)"
 ```
 
 ## Step 4 — Decide scope
@@ -69,7 +69,7 @@ Valid scope tokens: `precheck`, `ssl`, `security`, `stress`, `static`, `e2e`, `a
 
 ```bash
 cd "$PIPELINE_HOME"
-bash scripts/run-project.sh "$NAME" "$SCOPE"
+bash tests/scripts/run-project.sh "$NAME" "$SCOPE"
 ```
 
 Stream output. Don't `&` / background — the user wants to see progress.

@@ -1,0 +1,20 @@
+{
+  // F5 啟動：跑 ui/server.js，偵測 "listening on ..." 後自動用預設瀏覽器開頁。
+  // 不需要 Live Server（Live Server 只是靜態檔伺服器，沒辦法跑後端 /api/run）。
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Run UI Server (F5)",
+      "program": "${workspaceFolder}/ui/server.js",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "serverReadyAction": {
+        "pattern": "listening on (https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "openExternally"
+      }
+    }
+  ]
+}

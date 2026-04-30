@@ -3,32 +3,90 @@
   const submitBtn = document.getElementById('submit-btn');
   const statusEl = document.getElementById('status');
   const panel = document.getElementById('run-panel');
-  const logEl = document.getElementById('log');
-  const dlEl = document.getElementById('download');
+  const summaryEl = document.getElementById('progress-summary');
+  const listEl = document.getElementById('progress-list');
+  const dlBtn = document.getElementById('download-btn');
+
+  // ─── scope key → 中文顯示名 ───
+  const SCOPE_LABELS = {
+    ssl:        'SSL / TLS 掃描',
+    security:   '漏洞掃描 (ZAP)',
+    nuclei:     '漏洞模板掃描 (Nuclei)',
+    lighthouse: '效能 / 無障礙 (Lighthouse)',
+    links:      '死連結檢查 (Lychee)',
+    stress:     '負載測試 (k6)',
+    monkey:     'Monkey 隨機點擊',
+    'api-test': 'API / Auth 測試',
+    summary:    '彙整報告',
+  };
+
+  // 從 server log 行偵測對應 scope（match run-project.sh 的 ▶ / ⏭ 標題）
+  const detectScope = (line) => {
+    if (/SSL Scan/.test(line))            return 'ssl';
+    if (/ZAP/.test(line))                 return 'security';
+    if (/Nuclei/.test(line))              return 'nuclei';
+    if (/Lighthouse/.test(line))          return 'lighthouse';
+    if (/Link Check|Lychee/.test(line))   return 'links';
+    if (/Load Test|k6/.test(line))        return 'stress';
+    if (/Monkey|Gremlins/.test(line))     return 'monkey';
+    if (/API \/ Auth|Newman/.test(line))  return 'api-test';
+    if (/Report - /.test(line))           return 'summary';
+    return null;
+  };
+
+  const ICONS = { pending: '⏸', running: '▶', done: '✅', skipped: '⏭', failed: '❌' };
+
+  let scopes = [];
+  let states = {};
+  let downloadUrl = null;
 
   const setStatus = (msg, kind = '') => {
     statusEl.textContent = msg;
     statusEl.className = 'status' + (kind ? ' ' + kind : '');
   };
 
-  const append = (s) => {
-    logEl.textContent += s;
-    logEl.scrollTop = logEl.scrollHeight;
+  const render = () => {
+    listEl.innerHTML = '';
+    for (const s of scopes) {
+      const li = document.createElement('li');
+      li.className = states[s];
+      const icon = document.createElement('span');
+      icon.className = 'icon';
+      icon.textContent = ICONS[states[s]] || '·';
+      const text = document.createElement('span');
+      text.textContent = SCOPE_LABELS[s] || s;
+      li.append(icon, text);
+      listEl.appendChild(li);
+    }
+    const finished = scopes.filter(s => ['done', 'skipped', 'failed'].includes(states[s])).length;
+    summaryEl.textContent = `進度 ${finished} / ${scopes.length}`;
   };
 
+  const setState = (scope, state) => {
+    if (!scope || !(scope in states)) return;
+    states[scope] = state;
+    render();
+  };
+
+  // ─── 表單送出 ───
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    const scopes = fd.getAll('scope');
-    if (scopes.length === 0) {
-      setStatus('請至少勾選一個測試項目', 'error');
-      return;
-    }
+    const picked = fd.getAll('scope');
+    if (picked.length === 0) { setStatus('請至少勾選一個測試項目', 'error'); return; }
+
     submitBtn.disabled = true;
     setStatus('送出中…');
-    logEl.textContent = '';
+
+    // 重建進度狀態（summary 一定會跑，加進去顯示）
+    scopes = picked.includes('summary') ? picked.slice() : picked.concat(['summary']);
+    states = {};
+    for (const s of scopes) states[s] = 'pending';
+    downloadUrl = null;
+    dlBtn.disabled = true;
+    dlBtn.textContent = '⬇ 下載報告（測試結束後可下載）';
     panel.hidden = false;
-    dlEl.hidden = true;
+    render();
 
     let res;
     try {
@@ -45,29 +103,59 @@
       return;
     }
 
-    const jobId = data.job_id;
-    setStatus('任務已開始：' + jobId);
+    setStatus('任務已開始：' + data.job_id);
 
-    const es = new EventSource('/api/logs/' + jobId);
-    es.addEventListener('log', (ev) => append(ev.data + '\n'));
+    let currentRunning = null;
+    const es = new EventSource('/api/logs/' + data.job_id);
+
+    es.addEventListener('log', (ev) => {
+      const line = ev.data;
+      if (line.startsWith('▶')) {
+        const scope = detectScope(line);
+        if (scope) {
+          if (currentRunning && states[currentRunning] === 'running') setState(currentRunning, 'done');
+          currentRunning = scope;
+          setState(scope, 'running');
+        }
+      } else if (line.startsWith('⏭')) {
+        const scope = detectScope(line);
+        if (scope) setState(scope, 'skipped');
+      }
+    });
+
     es.addEventListener('done', (ev) => {
       const info = JSON.parse(ev.data);
       es.close();
       submitBtn.disabled = false;
-      if (info.exit_code === 0) {
-        setStatus('完成 ✅ 結束碼 0', 'ok');
-      } else {
-        setStatus('結束碼 ' + info.exit_code + '（部分測試可能失敗，仍可下載報告）', 'error');
+      // 清除剩下的 pending / running
+      for (const s of scopes) {
+        if (states[s] === 'pending' || states[s] === 'running') {
+          states[s] = info.exit_code === 0 ? 'done' : 'failed';
+        }
       }
+      render();
+      if (info.exit_code === 0) setStatus('完成 ✅', 'ok');
+      else setStatus('結束碼 ' + info.exit_code + '（部分測試可能失敗，仍可下載報告）', 'error');
+
       if (info.download_url) {
-        dlEl.href = info.download_url;
-        dlEl.hidden = false;
+        downloadUrl = info.download_url;
+        dlBtn.disabled = false;
+        dlBtn.textContent = '⬇ 下載報告 (zip)';
+      } else {
+        dlBtn.textContent = '（無報告可下載）';
       }
     });
+
     es.addEventListener('error', () => {
       es.close();
       submitBtn.disabled = false;
       setStatus('日誌連線中斷', 'error');
     });
+  });
+
+  // ─── 下載按鈕：disabled 時不做任何事；ready 時觸發下載 ───
+  dlBtn.addEventListener('click', () => {
+    if (dlBtn.disabled || !downloadUrl) return;
+    window.location.href = downloadUrl;
   });
 })();

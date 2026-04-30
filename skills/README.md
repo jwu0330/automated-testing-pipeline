@@ -98,7 +98,7 @@ skill 不會自動裝這些，但會明確告訴你缺哪個、該怎麼裝。
   │
   └─ /pipeline-run   ───────►  讀 .testing/testing.yml →
                                選 scope（預設 smoke：precheck,ssl）→
-                               跑 <pipeline>/scripts/run-project.sh →
+                               跑 <pipeline>/tests/scripts/run-project.sh →
                                摘要 <project>/.testing/reports/report.md
                                （不改設定、不註冊）
 ```

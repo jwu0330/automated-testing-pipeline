@@ -61,7 +61,7 @@ Verify via env helper:
 
 ```bash
 # ENV=win-with-wsl:
-wsl.exe bash -c "test -f '$PIPELINE_HOME/scripts/run-project.sh' && echo ok"
+wsl.exe bash -c "test -f '$PIPELINE_HOME/tests/scripts/run-project.sh' && echo ok"
 ```
 
 ## Step 3 — Create the review folder
@@ -122,8 +122,8 @@ wsl.exe bash -c "
 
 ```bash
 wsl.exe bash -c "
-  bash '$PIPELINE_HOME/scripts/register-project.sh' '$NAME' '$PIPELINE_HOME/$NAME' && \
-  bash '$PIPELINE_HOME/scripts/run-project.sh' '$NAME' all
+  bash '$PIPELINE_HOME/tests/scripts/register-project.sh' '$NAME' '$PIPELINE_HOME/$NAME' && \
+  bash '$PIPELINE_HOME/tests/scripts/run-project.sh' '$NAME' all
 "
 ```
 
