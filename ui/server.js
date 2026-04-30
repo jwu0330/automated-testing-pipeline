@@ -277,8 +277,10 @@ tests: {}
   fs.writeFileSync(path.join(testingDir, 'testing.yml'), yml);
 
   // 寫 .testing/.env：run-project.sh 會 source 這個檔（line 96-104）
+  // 沒填帳密 = 公開站台，LOGIN_REQUIRED 留 false，所有 spec / wrapper 走匿名路徑
   const envLines = [];
-  envLines.push('LOGIN_REQUIRED=true'); // 所有頁面都需登入
+  const hasAnyCreds = testers.some(t => t && t.user && t.pass);
+  if (hasAnyCreds) envLines.push('LOGIN_REQUIRED=true');
   if (targetUiUrl) envLines.push(`TARGET_UI_URL=${envQuote(targetUiUrl)}`);
   // tester1 → ADMIN_*，tester2 → USER1_*
   if (testers[0] && testers[0].user && testers[0].pass) {

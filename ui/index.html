@@ -30,21 +30,21 @@
         </label>
 
         <fieldset>
-          <legend>測試人員帳號 <em>必填</em></legend>
-          <p class="hint">所有頁面均需先登入，系統會自動執行登入流程。此帳密會用於所有測試項目。</p>
+          <legend>測試人員帳號 <em>選填</em></legend>
+          <p class="hint">若目標站需登入才能看到完整內容，填了會自動跑登入流程；公開頁面（無登入機制的官網）留空即可。</p>
           <div class="tester-row">
-            <input type="text" name="tester1_user" placeholder="帳號" value="admin001" required autocomplete="off">
-            <input type="text" name="tester1_pass" placeholder="密碼" value="@admin001" required autocomplete="off">
+            <input type="text" name="tester1_user" placeholder="帳號" value="admin001" autocomplete="off">
+            <input type="text" name="tester1_pass" placeholder="密碼" value="@admin001" autocomplete="off">
           </div>
           <div class="tester-row">
-            <input type="text" name="tester2_user" placeholder="帳號" value="admin001" autocomplete="off">
-            <input type="text" name="tester2_pass" placeholder="密碼" value="@admin001" autocomplete="off">
+            <input type="text" name="tester2_user" placeholder="帳號" autocomplete="off">
+            <input type="text" name="tester2_pass" placeholder="密碼" autocomplete="off">
           </div>
         </fieldset>
 
         <label>
           <span>Email（選填 — 填了會把報告摘要寄到您信箱）</span>
-          <input type="email" name="email" placeholder="you@example.com">
+          <input type="email" name="email" placeholder="you@example.com" value="wjy.3725.512@gmail.com">
         </label>
       </div>
 
