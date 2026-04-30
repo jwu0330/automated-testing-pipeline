@@ -151,18 +151,19 @@ export LOCAL_MODE URL_ONLY
 #
 # Login is form-based only; captured browser state replay is disabled.
 
-# 1) JOURNEYS_JSON：給 k6 用（auth 全當 false，cookie 一律不帶）
+# 1) JOURNEYS_JSON：給 k6 用；auth=true 時會使用同一個 job 內的短期 Cookie header
 #    若 testing.yml 有 tests.stress.journeys → 直接用
 #    否則退化：把 tests.stress.pages 包成單一匿名 journey
 RAW_STRESS=$(yq -o=json -I=0 '.tests.stress // {}' "$TESTING_YML" 2>/dev/null || echo '{}')
 if command -v node >/dev/null 2>&1; then
     JOURNEYS_JSON=$(node -e '
       const s = JSON.parse(process.argv[1] || "{}");
+      const defaultAuth = process.env.AUTH_MODE === "form";
       if (Array.isArray(s.journeys) && s.journeys.length) {
-        process.stdout.write(JSON.stringify(s.journeys.map(j => ({ ...j, auth: false }))));
+        process.stdout.write(JSON.stringify(s.journeys.map(j => ({ ...j, auth: j.auth == null ? defaultAuth : !!j.auth }))));
       } else if (Array.isArray(s.pages) && s.pages.length) {
         process.stdout.write(JSON.stringify([{
-          name: "anon", weight: 100, auth: false,
+          name: defaultAuth ? "auth_pages" : "anon", weight: 100, auth: defaultAuth,
           steps: s.pages.map(p => "GET " + p),
         }]));
       } else {
@@ -220,8 +221,10 @@ cat > "$REPORTS_RAW/auth-context.json" <<EOF
   "login_mode": "$AUTH_MODE",
   "requested_scope": "$SCOPE",
   "notes": [
+    "Auth discovery logs in with the form, crawls reachable pages, and writes same-job artifacts under raw/.",
     "E2E and Monkey are browser-based and can submit the login form.",
-    "Stress, ZAP, Nuclei, Lighthouse, Lychee, SSL, and precheck run URL/HTTP-level checks and do not reuse a browser login session."
+    "Stress, ZAP, Nuclei, Lighthouse, and Lychee can use auth-discovery URLs plus the same-job Cookie header when available.",
+    "SSL and precheck do not have an application-login concept because TLS and reachability happen before HTTP auth."
   ]
 }
 EOF
@@ -374,6 +377,52 @@ run_ssl() {
     docker compose --profile ssl up --build --abort-on-container-exit || echo "  (testssl 結束碼 $?)"
 }
 
+run_auth_discovery() {
+    if [ "$AUTH_MODE" != "form" ]; then
+        return 0
+    fi
+    echo ""
+    echo "▶ Auth Discovery - login and crawl authenticated surface"
+    echo "──────────────────────────────────────────"
+    rm -f "$REPORTS_RAW/auth-discovery.json" \
+          "$REPORTS_RAW/auth-urls.txt" \
+          "$REPORTS_RAW/auth-paths.txt" \
+          "$REPORTS_RAW/auth-journeys.json" \
+          "$REPORTS_RAW/auth-cookie-header.txt" 2>/dev/null || true
+
+    local env_args=()
+    [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
+    docker run --rm "${env_args[@]}" \
+        -e TARGET_URL="$TARGET_URL" \
+        -e TARGET_UI_URL="$TARGET_UI_URL" \
+        -e LOGIN_REQUIRED="$LOGIN_REQUIRED" \
+        -e ADMIN_USERNAME \
+        -e ADMIN_PASSWORD \
+        -e LOGIN_STATUS_PATH=/reports/login-status.json \
+        -e AUTH_DISCOVERY_REPORT_DIR=/reports \
+        -e AUTH_DISCOVERY_MAX_PAGES="${AUTH_DISCOVERY_MAX_PAGES:-12}" \
+        -e AUTH_DISCOVERY_MAX_DEPTH="${AUTH_DISCOVERY_MAX_DEPTH:-2}" \
+        -v "$ROOT/tests/e2e:/work" \
+        -v "$ROOT/tests/_shared:/work/_shared:ro" \
+        -v "$REPORTS_RAW:/reports" \
+        -w /work \
+        mcr.microsoft.com/playwright:v1.59.1-noble \
+        sh -c '
+            npm install --no-audit --no-fund --no-package-lock && \
+            npx playwright install chromium --with-deps && \
+            npx playwright test --project=chromium --grep "auth discovery"
+        ' \
+        || echo "  (auth discovery 結束碼 $?)"
+
+    if [ -s "$REPORTS_RAW/auth-cookie-header.txt" ]; then
+        AUTH_COOKIE_HEADER="$(cat "$REPORTS_RAW/auth-cookie-header.txt")"
+        export AUTH_COOKIE_HEADER
+        echo "  已產生登入後 URL 與短期 Cookie header"
+    else
+        echo "  未取得 Cookie header；非瀏覽器工具會退回匿名或 URL-only 掃描"
+    fi
+}
+
 # ─── 11 Security - ZAP ───
 run_security() {
     enabled security || { echo "⏭  11 Security - ZAP：略過"; return 0; }
@@ -391,7 +440,14 @@ run_stress() {
     echo "──────────────────────────────────────────"
     K6_VUS=$(yq -r '.tests.stress.vus // 10' "$TESTING_YML")
     K6_DURATION=$(yq -r '.tests.stress.duration // "30s"' "$TESTING_YML")
-    export K6_VUS K6_DURATION
+    if [ -z "${JOURNEYS_JSON:-}" ] && [ -s "$REPORTS_RAW/auth-journeys.json" ]; then
+        JOURNEYS_JSON="$(cat "$REPORTS_RAW/auth-journeys.json")"
+        echo "  使用 auth discovery 產生的登入後 journeys"
+    fi
+    if [ -z "${AUTH_COOKIE_HEADER:-}" ] && [ -s "$REPORTS_RAW/auth-cookie-header.txt" ]; then
+        AUTH_COOKIE_HEADER="$(cat "$REPORTS_RAW/auth-cookie-header.txt")"
+    fi
+    export K6_VUS K6_DURATION JOURNEYS_JSON AUTH_COOKIE_HEADER
     if [ -n "$JOURNEYS_JSON" ]; then
         local jc
         jc=$(node -e 'console.log(JSON.parse(process.argv[1]).length)' "$JOURNEYS_JSON" 2>/dev/null || echo "?")
@@ -895,6 +951,20 @@ done
 
 echo ""
 echo "  解析 scopes：${FINAL_SCOPES[*]}"
+
+NEEDS_AUTH_DISCOVERY=false
+if [ "$AUTH_MODE" = "form" ]; then
+    for s in "${FINAL_SCOPES[@]}"; do
+        case "$s" in
+            e2e|monkey|stress|security|nuclei|lighthouse|links)
+                NEEDS_AUTH_DISCOVERY=true
+                ;;
+        esac
+    done
+fi
+if $NEEDS_AUTH_DISCOVERY; then
+    run_auth_discovery
+fi
 
 for s in "${FINAL_SCOPES[@]}"; do
     run_scope "$s"

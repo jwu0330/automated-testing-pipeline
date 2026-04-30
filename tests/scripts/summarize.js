@@ -218,6 +218,27 @@ function parseAuthContext() {
   try { return JSON.parse(read(p)); } catch { return null; }
 }
 
+function parseAuthDiscovery() {
+  const p = findRaw('auth-discovery.json');
+  if (!p) return null;
+  try {
+    const data = JSON.parse(read(p));
+    const pages = Array.isArray(data.pages) ? data.pages : [];
+    return {
+      status: 'ok',
+      login: data.login || null,
+      pages,
+      okPages: pages.filter(p => p.ok).length,
+      formPages: pages.filter(p => Array.isArray(p.forms) && p.forms.length).length,
+      buttonPages: pages.filter(p => Array.isArray(p.buttons) && p.buttons.length).length,
+      cookieHeaderPresent: !!data.cookieHeaderPresent,
+      startUrl: data.startUrl || '',
+    };
+  } catch (e) {
+    return { status: 'parse-error', error: e.message };
+  }
+}
+
 // ─── ⑫ E2E 全頁巡檢（crawl）──────────────────────────────
 function parseCrawl() {
   const p = findRaw('crawl-report.json');
@@ -467,6 +488,7 @@ function parseWarnings() {
 // ═══════════════════════════════════════════════════════════════
 const warnings = parseWarnings();
 const authCtx = parseAuthContext();
+const authDiscovery = parseAuthDiscovery();
 const crawl = parseCrawl();
 const s  = parseSSL();
 const ps = parsePHPStan();
@@ -531,17 +553,28 @@ if (authCtx) {
   if (authCtx.auto_enabled_login_required) {
     L.push('- LOGIN_REQUIRED was auto-enabled because credentials were provided.');
   }
+  if (authDiscovery?.status === 'ok') {
+    L.push(`- Auth discovery: **${authDiscovery.okPages}/${authDiscovery.pages.length}** logged-in pages reachable; forms on ${authDiscovery.formPages} pages; buttons/actions on ${authDiscovery.buttonPages} pages.`);
+    L.push(`- Same-job Cookie header for non-browser tools: **${authDiscovery.cookieHeaderPresent ? 'available' : 'not available'}**.`);
+  } else if (authDiscovery?.status === 'parse-error') {
+    L.push(`- Auth discovery parse error: ${authDiscovery.error}`);
+  } else {
+    L.push('- Auth discovery: no report.');
+  }
   L.push('- Browser-authenticated scopes: `e2e`, `monkey` use form login when mode is `form`.');
-  L.push('- Anonymous URL/HTTP scopes: `stress`, `security`/ZAP, `nuclei`, `lighthouse`, `links`, `ssl`, `precheck` do not reuse browser login state.');
+  L.push('- Auth-discovery scopes: `stress`, `security`/ZAP, `nuclei`, `lighthouse`, `links` can use discovered logged-in URLs and same-job Cookie header when available.');
   L.push('- `api-test` / `auth-test` can use credentials only through API collections; they are separate from browser login.');
+  L.push('- `ssl` / `precheck` do not have an application-login concept; TLS is checked before HTTP login exists.');
   L.push('');
   L.push('| Scope | Auth behavior | What it means |');
   L.push('|------|------|------|');
   L.push('| `e2e` | form login when enabled | Smoke checks plus crawl can start after login. |');
   L.push('| `monkey` | form login when enabled | UI interaction fuzzing can run on a logged-in browser page. |');
-  L.push('| `stress` | anonymous HTTP by default | Load test hits configured HTTP journeys, not logged-in browser flows. |');
-  L.push('| `security` / `nuclei` | anonymous scan | Finds public-surface issues unless a tool-specific auth flow is configured later. |');
-  L.push('| `lighthouse` / `links` | anonymous page load | Measures/checks reachable public URLs only. |');
+  L.push('| `stress` | auth discovery when available | k6 hits discovered logged-in paths with the same-job Cookie header. |');
+  L.push('| `security` / ZAP | auth discovery when available | ZAP starts from a logged-in URL and injects the same-job Cookie header. |');
+  L.push('| `nuclei` | auth discovery when available | Nuclei scans the discovered logged-in URL list with the same-job Cookie header. |');
+  L.push('| `lighthouse` | auth discovery when available | Lighthouse audits logged-in pages for performance and accessibility. |');
+  L.push('| `links` | auth discovery when available | Lychee checks links discovered from logged-in pages. |');
   L.push('| `ssl` / `precheck` | no app login | TLS and basic reachability only. |');
   L.push('');
 }
@@ -1045,6 +1078,7 @@ L.push('| `raw/monkey-report.json` `raw/monkey-html/index.html` | Monkey (Gremli
 L.push('| `raw/trivy-fs.json` | Trivy 供應鏈掃描 |');
 L.push('| `raw/lychee.json` | Lychee 壞連結清單 |');
 L.push('| `raw/crawl-report.json` | E2E 全頁巡檢：每個分頁的可達狀態 / JS 錯誤 / 載入時間 |');
+L.push('| `raw/auth-discovery.json` `raw/auth-urls.txt` | 登入後黑箱探索結果，供壓測、ZAP、Nuclei、Lighthouse、Lychee 使用 |');
 L.push('');
 
 // ─── 寫檔 ────────────────────────────────────────────────

@@ -29,6 +29,7 @@ import { check, sleep } from 'k6';
 const TARGET = (__ENV.TARGET_URL || 'https://example.com').replace(/\/$/, '');
 const TOTAL_VUS = parseInt(__ENV.K6_VUS || '10', 10);
 const DURATION = __ENV.K6_DURATION || '30s';
+const AUTH_COOKIE_HEADER = __ENV.AUTH_COOKIE_HEADER || '';
 
 // ─── 解析 journeys ────────────────────────────────────────────
 function parseJourneys() {
@@ -42,7 +43,8 @@ function parseJourneys() {
     return arr.map((j, i) => ({
       name: (j.name || `journey_${i}`).replace(/[^a-zA-Z0-9_]/g, '_'),
       weight: typeof j.weight === 'number' && j.weight > 0 ? j.weight : 100,
-      auth: false,
+      auth: !!j.auth,
+      headers: j.headers || {},
       steps: Array.isArray(j.steps) ? j.steps : [],
     }));
   } catch (e) {
@@ -113,7 +115,7 @@ export function setup() {
   return {
     journeys: JOURNEYS.map(j => ({ name: j.name, auth: j.auth, steps: j.steps.length, weight: j.weight })),
     target: TARGET,
-    cookie_present: false,
+    cookie_present: !!AUTH_COOKIE_HEADER,
   };
 }
 
@@ -128,7 +130,10 @@ export default function () {
     sleep(1);
     return;
   }
-  const baseHeaders = {};
+  const baseHeaders = {
+    ...(journey.auth && AUTH_COOKIE_HEADER ? { Cookie: AUTH_COOKIE_HEADER } : {}),
+    ...(journey.headers || {}),
+  };
 
   for (const rawStep of journey.steps) {
     const { method, path, body, headers } = parseStep(rawStep);
