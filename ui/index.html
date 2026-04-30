@@ -30,26 +30,21 @@
         </label>
 
         <fieldset>
-          <legend>測試人員帳號（選填；只有 API / Auth 測試會用到）</legend>
-          <p class="hint">目標站若已關後端 auth，**不必填**——pipeline 預設不做登入動作。</p>
+          <legend>測試人員帳號 <em>必填</em></legend>
+          <p class="hint">所有頁面均需先登入，系統會自動執行登入流程。此帳密會用於所有測試項目。</p>
           <div class="tester-row">
-            <input type="text" name="tester1_user" placeholder="帳號（選填）" autocomplete="off">
-            <input type="text" name="tester1_pass" placeholder="密碼（選填）" autocomplete="off">
+            <input type="text" name="tester1_user" placeholder="帳號" value="admin001" required autocomplete="off">
+            <input type="text" name="tester1_pass" placeholder="密碼" value="@admin001" required autocomplete="off">
           </div>
           <div class="tester-row">
-            <input type="text" name="tester2_user" placeholder="帳號（選填）" autocomplete="off">
-            <input type="text" name="tester2_pass" placeholder="密碼（選填）" autocomplete="off">
+            <input type="text" name="tester2_user" placeholder="帳號" value="admin001" autocomplete="off">
+            <input type="text" name="tester2_pass" placeholder="密碼" value="@admin001" autocomplete="off">
           </div>
         </fieldset>
 
         <label>
           <span>Email（選填 — 填了會把報告摘要寄到您信箱）</span>
           <input type="email" name="email" placeholder="you@example.com">
-        </label>
-
-        <label>
-          <span>OpenAPI 檔（選填，僅 API 測試用 — yaml / yml / json）</span>
-          <input type="file" name="openapi" accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml">
         </label>
       </div>
 
@@ -66,6 +61,11 @@
           <label class="check"><input type="checkbox" name="scope" value="monkey"> Monkey 隨機點擊 (Gremlins)</label>
           <label class="check"><input type="checkbox" name="scope" value="api-test"> API 測試（需上傳 OpenAPI）</label>
         </fieldset>
+
+        <label>
+          <span>OpenAPI 檔（選填，僅 API 測試用 — yaml / yml / json）</span>
+          <input type="file" name="openapi" accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml">
+        </label>
 
         <!--
           Session 區塊已於 2026-04-30 廢棄：目標站多數已關後端 auth，
