@@ -14,32 +14,75 @@ You are setting up the **current working directory's project** to use a separate
 
 **You do not run tests in this skill.** Initialization only.
 
+## Step 0 — Detect execution environment (CRITICAL)
+
+The pipeline runs **inside WSL+Docker** on Windows. `yq` / `docker` / `node` only need to exist in WSL — **not** in your current shell. So if Claude Code was launched from a Windows-native bash (git bash / Cygwin), don't check or run those tools locally; route everything through WSL.
+
+```bash
+# Detect environment
+if [ -f /proc/version ] && grep -qi microsoft /proc/version; then
+  ENV=wsl                     # already inside WSL — run commands directly
+elif command -v wsl.exe >/dev/null 2>&1; then
+  ENV=win-with-wsl            # Windows-native bash with WSL available
+elif command -v docker >/dev/null 2>&1; then
+  ENV=native                  # plain Linux/Mac
+else
+  ENV=unknown
+fi
+echo "ENV=$ENV"
+```
+
+Define a helper for invoking pipeline commands. **Use this for every command that touches the pipeline (yq, register-project.sh, run-project.sh, docker, file checks under `/mnt/...`).**
+
+- `ENV=wsl` or `ENV=native` → run as `bash -c '<cmd>'`
+- `ENV=win-with-wsl` → run as `wsl.exe bash -c '<cmd>'`
+
+**Path translation rules (use WSL-style `/mnt/...` paths in `testing.yml` and registry):**
+
+| Input | Output (store this) |
+|-------|---------------------|
+| `/e/foo/bar` (git bash) | `/mnt/e/foo/bar` |
+| `E:\foo\bar` | `/mnt/e/foo/bar` |
+| `/mnt/e/foo` | `/mnt/e/foo` (unchanged) |
+| `/home/...` (already in WSL) | unchanged |
+
+When `pwd` returns `/e/...`, translate before storing as `local_path`. Same for the pipeline path.
+
+> **Why this matters**: Docker mounts in WSL only see `/mnt/e/...`. Writing `/e/cwe網站/...` to the registry produces a path that won't mount when `run-project.sh` runs in WSL.
+
 ## Step 1 — Locate the pipeline
 
 Find the pipeline in this priority order:
 
-1. `$PIPELINE_HOME` env var
+1. `$PIPELINE_HOME` env var (translate to `/mnt/...` if it's a `/e/...` path)
 2. `.testing/testing.yml` → `pipeline.home` field (if `.testing/` already exists)
 3. Default: `/mnt/e/Code/github/automated-testing-pipeline`
 4. Ask the user (single question, give them the default to accept)
 
-Verify with:
+Verify **via the chosen env** (don't `test -f` locally if `ENV=win-with-wsl`):
 
 ```bash
+# ENV=wsl / native:
 test -f "$PIPELINE_HOME/tests/scripts/run-project.sh" && echo ok
+# ENV=win-with-wsl:
+wsl.exe bash -c "test -f '$PIPELINE_HOME/tests/scripts/run-project.sh' && echo ok"
 ```
 
-If the pipeline isn't there, stop and tell the user how to get it (`git clone git@github.com:jwu0330/automated-testing-pipeline.git`). **Don't clone for them.**
+If the pipeline isn't there, stop and tell the user how to get it (`git clone git@github.com:jwu0330/automated-testing-pipeline.git` **inside WSL**, into a path under `/mnt/e/` or `~/`). **Don't clone for them.**
 
 ## Step 2 — Verify prerequisites
 
-Run in one Bash batch:
+**The pipeline only requires Docker on the host.** `yq` is auto-downloaded into `<pipeline>/bin/yq` on first script invocation; `node` falls back to a Docker image if missing. So check only Docker:
 
 ```bash
-docker --version; docker compose version; yq --version; node --version
+# ENV=wsl / native:
+docker --version; docker compose version
+
+# ENV=win-with-wsl:
+wsl.exe bash -c 'docker --version; docker compose version'
 ```
 
-Surface anything missing with the install command. Don't install for the user.
+If Docker is missing in WSL, surface the install link (<https://docs.docker.com/engine/install/>) and stop. Don't install for the user.
 
 ## Step 3 — Gather project context
 
@@ -49,12 +92,20 @@ In the **current working directory** (the user's target project, not the pipelin
 |-------|------------------|
 | `name` | Folder basename, lowercased, non-alphanum→`_`. Show user, let them override. |
 | `target_url` | Ask the user. No good default. |
-| `local_path` | `pwd` (absolute). |
+| `local_path` | `pwd` then **translate to `/mnt/...` per Step 0 rules** before storing. |
 | `php_version` | If `composer.json` exists, read `require.php`; else `"8.1"`. |
 
 ## Step 4 — Auto-detect OpenAPI spec
 
-Search the project for OpenAPI files. Use Glob with these patterns (first match wins):
+**Priority 1 — Default path (`local/doc/openapi.yaml`)**: This is the hard-coded default. Try it first:
+
+```bash
+test -f local/doc/openapi.yaml && echo "USING DEFAULT"
+```
+
+If found, use it. Skip further searching.
+
+**Priority 2 — Fallback search** (only if default missing). Use Glob with these patterns (first match wins):
 
 1. `.testing/api/openapi.{yaml,yml,json}`  ← canonical location
 2. `openapi.{yaml,yml,json}` at project root
@@ -63,13 +114,13 @@ Search the project for OpenAPI files. Use Glob with these patterns (first match 
 5. `api/openapi.{yaml,yml,json}` / `api-spec.{yaml,yml,json}`
 6. `**/openapi.{yaml,yml,json}` (broad fallback, exclude `node_modules`, `vendor`, `.git`)
 
-If you find one:
-- Verify it's actually an OpenAPI 3.x spec by reading the first ~10 lines and checking for `openapi: 3.` or `"openapi": "3.` (or `swagger: "2.0"` for legacy).
-- Note the **path relative to project root**.
+For the chosen file:
+- Verify it's actually an OpenAPI 3.x spec (read first ~10 lines, look for `openapi: 3.` / `"openapi": "3.` / `swagger: "2.0"` legacy).
+- Note path relative to project root.
 
-If nothing found, that's fine — the project may not have an API. Tell the user; offer two options:
-- (a) Drop a spec at `.testing/api/openapi.yaml` later and rerun init
-- (b) Continue without API tests (pipeline will skip silently)
+If nothing found:
+- Write `tests.api-test.openapi: local/doc/openapi.yaml` to testing.yml anyway (the hard-coded default — user can fix later)
+- Tell the user: "no spec found at default `local/doc/openapi.yaml` or in usual places. Drop one there and `/pipeline-run` will pick it up. Or continue without API tests."
 
 ## Step 5 — Create `.testing/` kit
 
@@ -132,7 +183,13 @@ E2E_PASSWORD=
 Generate **`.testing/.gitignore`**:
 
 ```
+# 測試敏感值
 .env
+
+# 測試結果（pipeline 寫進這裡，每次執行覆蓋）
+reports/
+
+# 暫存產物
 ephemeral/
 ```
 
@@ -140,15 +197,27 @@ If OpenAPI was detected, ensure `.testing/api/` exists (just `mkdir`; don't move
 
 ## Step 6 — Register the project
 
+Use the env-aware helper from Step 0. **Always pass the WSL-style `/mnt/...` path**, not the git-bash `/e/...` form:
+
 ```bash
-bash "$PIPELINE_HOME/tests/scripts/register-project.sh" <name> "<absolute project path>"
+# ENV=wsl / native:
+bash "$PIPELINE_HOME/tests/scripts/register-project.sh" "<name>" "<wsl-path>"
+
+# ENV=win-with-wsl:
+wsl.exe bash -c "bash '$PIPELINE_HOME/tests/scripts/register-project.sh' '<name>' '<wsl-path>'"
 ```
 
-Verify:
+Verify (same env-aware pattern):
 
 ```bash
+# ENV=wsl / native:
 yq ".projects.<name>" "$PIPELINE_HOME/projects.registry.yml"
+
+# ENV=win-with-wsl:
+wsl.exe bash -c "yq '.projects.<name>' '$PIPELINE_HOME/projects.registry.yml'"
 ```
+
+If `ENV=win-with-wsl` and `wsl.exe` isn't found, **don't fall back to local yq** — instead skip register and tell the user exactly how to install WSL (`wsl --install` from PowerShell as admin) or run register manually from a WSL terminal.
 
 ## Step 7 — Final report
 

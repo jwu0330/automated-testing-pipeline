@@ -12,7 +12,31 @@ description: |
 
 You execute tests against the **current project** using a separately-installed `automated-testing-pipeline`. This skill assumes `/pipeline-init` has been run successfully.
 
+## Step 0 — Detect execution environment (CRITICAL)
+
+The pipeline runs **inside WSL+Docker** on Windows. `yq` / `docker` / `node` only need to exist in WSL. If Claude Code launched from a Windows-native bash (git bash), route every pipeline command through WSL — don't check tools locally.
+
+```bash
+if [ -f /proc/version ] && grep -qi microsoft /proc/version; then
+  ENV=wsl
+elif command -v wsl.exe >/dev/null 2>&1; then
+  ENV=win-with-wsl
+elif command -v docker >/dev/null 2>&1; then
+  ENV=native
+else
+  ENV=unknown
+fi
+```
+
+Helper rule:
+- `ENV=wsl` / `native` → run `bash -c '<cmd>'`
+- `ENV=win-with-wsl` → run `wsl.exe bash -c '<cmd>'`
+
+**Always use WSL-style `/mnt/...` paths** when invoking pipeline scripts (the registry stores them this way; Docker mounts only see this form).
+
 ## Step 1 — Sanity check
+
+This one is local — `.testing/testing.yml` lives in the user's project, accessible from any shell:
 
 ```bash
 test -f .testing/testing.yml && echo ok || echo "NOT INITIALIZED"
@@ -24,28 +48,43 @@ If `.testing/testing.yml` doesn't exist, **stop**. Tell the user to run `/pipeli
 
 Same priority as `/pipeline-init`:
 
-1. `$PIPELINE_HOME`
+1. `$PIPELINE_HOME` (translate `/e/...` → `/mnt/e/...`)
 2. `.testing/testing.yml` → `pipeline.home`
 3. Default: `/mnt/e/Code/github/automated-testing-pipeline`
 4. Ask once if all the above fail.
 
-Verify:
+Verify via the chosen env:
 
 ```bash
+# ENV=wsl / native:
 test -f "$PIPELINE_HOME/tests/scripts/run-project.sh" && echo ok
+# ENV=win-with-wsl:
+wsl.exe bash -c "test -f '$PIPELINE_HOME/tests/scripts/run-project.sh' && echo ok"
 ```
 
 ## Step 3 — Verify project is registered
 
+Reading `testing.yml` is local (the file is in the project). Reading the registry (`projects.registry.yml` under the pipeline) goes through the env helper:
+
 ```bash
+# Local: read project name from testing.yml — yq via env helper since yq lives in WSL
+# ENV=wsl / native:
 NAME=$(yq -r .project.name .testing/testing.yml)
-yq -r ".projects.${NAME}.path // \"\"" "$PIPELINE_HOME/projects.registry.yml"
+REGISTERED=$(yq -r ".projects.${NAME}.path // \"\"" "$PIPELINE_HOME/projects.registry.yml")
+
+# ENV=win-with-wsl:
+NAME=$(wsl.exe bash -c "yq -r .project.name '$(pwd -W 2>/dev/null || pwd)/.testing/testing.yml'" | tr -d '\r')
+REGISTERED=$(wsl.exe bash -c "yq -r '.projects.${NAME}.path // \"\"' '$PIPELINE_HOME/projects.registry.yml'" | tr -d '\r')
 ```
 
-If empty, register on the fly:
+If empty, register on the fly (use `local_path` from `testing.yml`, which is already `/mnt/...`):
 
 ```bash
-bash "$PIPELINE_HOME/tests/scripts/register-project.sh" "$NAME" "$(pwd)"
+# ENV=wsl / native:
+bash "$PIPELINE_HOME/tests/scripts/register-project.sh" "$NAME" "$LOCAL_PATH"
+
+# ENV=win-with-wsl:
+wsl.exe bash -c "bash '$PIPELINE_HOME/tests/scripts/register-project.sh' '$NAME' '$LOCAL_PATH'"
 ```
 
 ## Step 4 — Decide scope
@@ -67,20 +106,40 @@ Valid scope tokens: `precheck`, `ssl`, `security`, `stress`, `static`, `e2e`, `a
 
 ## Step 5 — Run
 
+Always invoke through the env helper (Docker is in WSL):
+
 ```bash
-cd "$PIPELINE_HOME"
-bash tests/scripts/run-project.sh "$NAME" "$SCOPE"
+# ENV=wsl / native:
+cd "$PIPELINE_HOME" && bash tests/scripts/run-project.sh "$NAME" "$SCOPE"
+
+# ENV=win-with-wsl:
+wsl.exe bash -c "cd '$PIPELINE_HOME' && bash tests/scripts/run-project.sh '$NAME' '$SCOPE'"
 ```
 
 Stream output. Don't `&` / background — the user wants to see progress.
 
 ## Step 6 — Surface results
 
-After it finishes, parse the report:
+After it finishes, read the report. **v0.6+ stores reports inside the project**, not the pipeline:
+
+- 有 `local_path` 的專案 → `<local_path>/.testing/reports/report.md`
+- 無 `local_path`（純遠端測試） → `<pipeline>/.tmp-reports/<name>/report.md`
+
+Resolve the right one from `testing.yml`:
 
 ```bash
-REPORT_DIR="$PIPELINE_HOME/reports/$NAME"
+LOCAL_PATH=$(yq -r '.project.local_path // ""' .testing/testing.yml)
+if [ -n "$LOCAL_PATH" ]; then
+    REPORT_DIR="$LOCAL_PATH/.testing/reports"
+else
+    REPORT_DIR="$PIPELINE_HOME/.tmp-reports/$NAME"
+fi
+
+# ENV=wsl / native:
 test -f "$REPORT_DIR/report.md" && head -60 "$REPORT_DIR/report.md"
+
+# ENV=win-with-wsl:
+wsl.exe bash -c "test -f '$REPORT_DIR/report.md' && head -60 '$REPORT_DIR/report.md'"
 ```
 
 Highlight in your reply:
@@ -93,9 +152,11 @@ Highlight in your reply:
 End with:
 
 ```
-📊 Full report: <pipeline>/reports/<name>/report.md
-📁 Raw outputs: <pipeline>/reports/<name>/raw/
+📊 Full report: <REPORT_DIR>/report.md
+📁 Raw outputs: <REPORT_DIR>/raw/
 ```
+
+(`<REPORT_DIR>` is the path resolved above — typically `<your-project>/.testing/reports/`.)
 
 If `report.json` shows `overallScore < 80` or has parse errors, end with a single sentence stating what to fix first.
 

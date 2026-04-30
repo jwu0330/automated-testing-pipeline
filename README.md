@@ -101,7 +101,7 @@ automated-testing-pipeline/
 │   ├── e2e/                       # Playwright 通用骨架
 │   └── monkey/                    # Gremlins.js monkey 測試骨架
 │
-├── skills/                        # ★ 介面 1：Claude Code Slash Commands
+├── .claude/skills/                # ★ 介面 1：Claude Code Slash Commands
 │   ├── pipeline-init/             #   情境 A：初始化專案接入
 │   ├── pipeline-run/              #   情境 A：跑測試
 │   └── pipeline-quick-test/       #   情境 B：一次性 review 別人網站
@@ -155,7 +155,7 @@ for s in pipeline-init pipeline-run pipeline-quick-test; do
 done
 ```
 
-完整安裝說明：[`skills/README.md`](./skills/README.md)。
+完整安裝說明：[`.claude/skills/README.md`](./.claude/skills/README.md)。
 
 ### CLI 直接操作（給沒裝 Claude Code 的人）
 
@@ -188,7 +188,7 @@ PORT=3000 node ui/server.js
 
 ## 文件
 
-- **[`skills/README.md`](./skills/README.md)** ★ **從這裡開始** — 三個 skill 的使用方式
+- **[`.claude/skills/README.md`](./.claude/skills/README.md)** ★ **從這裡開始** — 三個 skill 的使用方式
 - [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) — 15 分鐘上手 CLI 流程
 - [docs/project-convention.md](./docs/project-convention.md) — 專案測試規範
 - [docs/run-tests.md](./docs/run-tests.md) — 操作手冊
