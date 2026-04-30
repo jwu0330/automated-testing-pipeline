@@ -297,7 +297,7 @@ tests: {}
   const statusFile = path.join(jobDir, 'status.json');
   fs.writeFileSync(logFile, '');
   fs.writeFileSync(statusFile, JSON.stringify({ state: 'running', job_id: jobId, started: Date.now() }));
-  fs.writeFileSync(LOCK, JSON.stringify({ pid: process.pid, job_id: jobId, started: Date.now() }));
+  fs.writeFileSync(LOCK, JSON.stringify({ pid: process.pid, job_id: jobId, project_name: projectName, started: Date.now() }));
 
   const scopeArg = scopes.includes('summary') ? scopes.join(',') : scopes.concat(['summary']).join(',');
   const logFd = fs.openSync(logFile, 'a');
@@ -431,11 +431,40 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /api/active — 查當前是否有任務在跑
+  // 設計：F5 重整 / 重登後，前端先打這支，回 null = 乾淨；回 job_id = 顯眼提示 + 亮取消鈕
+  // 副作用：lock 殘留但 process 已死 → 順手清掉，避免 UI 永遠卡在「忙碌」
+  if (req.method === 'GET' && pathname === '/api/active') {
+    const existing = readLock();
+    if (!existing) { sendJSON(res, 200, { active: null }); return; }
+    if (!lockAlive(existing)) {
+      clearLock();
+      sendJSON(res, 200, { active: null, cleared: true, was: existing.job_id });
+      return;
+    }
+    sendJSON(res, 200, {
+      active: {
+        job_id: existing.job_id,
+        project_name: existing.project_name || null,
+        started: existing.started || null,
+      }
+    });
+    return;
+  }
+
   // POST /api/run
   if (req.method === 'POST' && pathname === '/api/run') {
     const existing = readLock();
     if (lockAlive(existing)) {
-      sendJSON(res, 503, { error: '系統忙碌中，已有任務執行：' + existing.job_id });
+      // 把 job_id 與 project_name 一起回給前端，讓 UI 能恢復面板 + 提供取消按鈕
+      sendJSON(res, 503, {
+        error: '系統忙碌中，已有任務執行：' + existing.job_id,
+        active: {
+          job_id: existing.job_id,
+          project_name: existing.project_name || null,
+          started: existing.started || null,
+        }
+      });
       return;
     }
     if (existing) clearLock();

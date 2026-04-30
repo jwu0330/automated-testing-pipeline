@@ -215,6 +215,22 @@
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      // 503 + active：伺服器告訴我們「有任務在跑」— 把面板恢復成「正在跑那個任務」的樣子，
+      // 讓使用者看到進度 + 可按取消，而不是只看到一行紅字。
+      if (res.status === 503 && data.active && data.active.job_id) {
+        setStatus('已有任務執行中：' + data.active.job_id + '（可在下方按「取消測試」結束）', 'error');
+        // 沒辦法知道那個任務原本選了哪些 scope；先攤開全部已知 scope 當 placeholder，
+        // SSE 重播會用 ▶ 行覆蓋成正確狀態。
+        const fallback = picked.length ? picked : Object.keys(SCOPE_LABELS);
+        scopes = fallback.includes('summary') ? fallback.slice() : fallback.concat(['summary']);
+        states = {};
+        for (const s of scopes) states[s] = 'pending';
+        panel.hidden = false;
+        render();
+        saveJob(data.active.job_id, scopes);
+        attachSSE(data.active.job_id);
+        return;
+      }
       setStatus(data.error || ('伺服器錯誤 HTTP ' + res.status), 'error');
       submitBtn.disabled = false;
       return;
@@ -231,19 +247,57 @@
     window.location.href = downloadUrl;
   });
 
-  // ─── 頁面載入時：若 localStorage 有活躍任務 → 重建進度 UI + 重連 SSE ───
-  // SSE endpoint 會從 log 檔起點重播，且 status=done 時直接送 done event；
-  // 所以「跑到一半重整」會看到當前進度，「跑完才重整」會收到 done → clearJob → 乾淨頁面
-  const _saved = loadJob();
-  if (_saved && _saved.jobId && Array.isArray(_saved.scopes) && _saved.scopes.length) {
-    const picked = _saved.scopes;
+  // ─── 頁面載入時：以 server 端 lock 為權威，重建進度 UI ───
+  // 流程：
+  //   1) 先打 /api/active：lock 死/不存在 → server 順手清掉 → 回 null → 乾淨頁面
+  //   2) lock 還活著 → 恢復面板 + 亮取消鈕，attachSSE 會從頭重播 log
+  //   3) /api/active 失敗（server 沒起來等）→ 退化成舊行為，吃 localStorage
+  const restoreFromActive = (jobId, scopesHint) => {
+    // server 沒告訴我們原本選了哪些 scope；用 hint 或全部已知 scope 當 placeholder，
+    // SSE 重播會用 ▶ 行覆蓋成正確狀態
+    const picked = (scopesHint && scopesHint.length) ? scopesHint : Object.keys(SCOPE_LABELS);
     scopes = picked.includes('summary') ? picked.slice() : picked.concat(['summary']);
     states = {};
     for (const s of scopes) states[s] = 'pending';
     panel.hidden = false;
     submitBtn.disabled = true;
-    setStatus('恢復進行中的任務：' + _saved.jobId);
+    setStatus('恢復進行中的任務：' + jobId + '（可按「取消測試」結束）');
     render();
-    attachSSE(_saved.jobId);
-  }
+    saveJob(jobId, scopes);
+    attachSSE(jobId);
+  };
+
+  (async () => {
+    let serverReachable = false;
+    let serverActive = null;
+    try {
+      const r = await fetch('/api/active');
+      if (r.ok) {
+        serverReachable = true;
+        const d = await r.json().catch(() => ({}));
+        serverActive = d && d.active ? d.active : null;
+      }
+    } catch {
+      // server 不在或網路問題 — 退化到 localStorage
+    }
+
+    if (serverActive && serverActive.job_id) {
+      const _saved = loadJob();
+      const hint = (_saved && _saved.jobId === serverActive.job_id && Array.isArray(_saved.scopes)) ? _saved.scopes : null;
+      restoreFromActive(serverActive.job_id, hint);
+      return;
+    }
+
+    if (serverReachable) {
+      // server 明確說沒有活躍任務 → localStorage 殘留都是 stale，清掉
+      clearJob();
+      return;
+    }
+
+    // server 不在 → 信任 localStorage（舊行為）
+    const _saved = loadJob();
+    if (_saved && _saved.jobId && Array.isArray(_saved.scopes) && _saved.scopes.length) {
+      restoreFromActive(_saved.jobId, _saved.scopes);
+    }
+  })();
 })();
