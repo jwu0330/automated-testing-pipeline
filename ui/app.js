@@ -15,12 +15,14 @@
     lighthouse: '效能 / 無障礙 (Lighthouse)',
     links:      '死連結檢查 (Lychee)',
     stress:     '負載測試 (k6)',
+    e2e:        '端對端測試 (Playwright)',
     monkey:     'Monkey 隨機點擊',
     'api-test': 'API / Auth 測試',
     summary:    '彙整報告',
   };
 
   // 從 server log 行偵測對應 scope（match run-project.sh 的 ▶ / ⏭ 標題）
+  // 注意先後順序：specific match 要排前面（"E2E Tests" 含 "Tests" 字樣，避免被泛規則誤判）
   const detectScope = (line) => {
     if (/SSL Scan/.test(line))            return 'ssl';
     if (/ZAP/.test(line))                 return 'security';
@@ -28,6 +30,7 @@
     if (/Lighthouse/.test(line))          return 'lighthouse';
     if (/Link Check|Lychee/.test(line))   return 'links';
     if (/Load Test|k6/.test(line))        return 'stress';
+    if (/E2E Tests/.test(line))           return 'e2e';
     if (/Monkey|Gremlins/.test(line))     return 'monkey';
     if (/API \/ Auth|Newman/.test(line))  return 'api-test';
     if (/Report - /.test(line))           return 'summary';
@@ -158,4 +161,91 @@
     if (dlBtn.disabled || !downloadUrl) return;
     window.location.href = downloadUrl;
   });
+
+  // ─── 路徑 A：🪟 跳出 Playwright 視窗手動登入 ───
+  const browserBtn  = document.getElementById('prelogin-browser-btn');
+  const browserUrl  = document.getElementById('prelogin-browser-url');
+  const browserStat = document.getElementById('prelogin-browser-status');
+  if (browserBtn) {
+    browserBtn.addEventListener('click', async () => {
+      const setStat = (msg, cls = '') => {
+        browserStat.textContent = msg;
+        browserStat.className = 'status' + (cls ? ' ' + cls : '');
+      };
+      const fd = new FormData(form);
+      const targetUrl = (fd.get('target_url') || '').trim();
+      const loginUrl = (browserUrl.value || '').trim() || targetUrl;
+      if (!loginUrl) { setStat('請先填上方「目標 URL」，或在這欄填登入頁 URL', 'error'); return; }
+
+      browserBtn.disabled = true;
+      setStat('🪟 已要求後端跳出瀏覽器視窗 — 請在跳出的視窗手動登入，登入完成後關閉視窗（最長 5 分鐘）');
+      try {
+        const res = await fetch('/api/prelogin-browser', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ loginUrl }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          let msg = '✗ 失敗：' + (data.reason || ('HTTP ' + res.status));
+          if (data.hint) msg += '\n💡 ' + data.hint;
+          if (data.stderr) msg += '\nstderr: ' + data.stderr;
+          setStat(msg, 'error');
+          return;
+        }
+        const storageTaEl = document.getElementById('storage_state_text');
+        storageTaEl.value = JSON.stringify(data.storageState);
+        setStat(`✓ ${data.reason}（已自動填入下方 Session 框）`, 'ok');
+      } catch (e) {
+        setStat('✗ 連線失敗：' + e.message, 'error');
+      } finally {
+        browserBtn.disabled = false;
+      }
+    });
+  }
+
+  // ─── 路徑 B：🔑 HTTP 自動登入 ───
+  // 用上方表單已填的「目標 URL」「tester1 帳密」打 /api/prelogin，
+  // 成功後把回傳的 storageState JSON 自動填到 textarea
+  const preloginBtn  = document.getElementById('prelogin-btn');
+  const preloginUrl  = document.getElementById('prelogin-url');
+  const preloginStat = document.getElementById('prelogin-status');
+  const storageTa    = document.getElementById('storage_state_text');
+  if (preloginBtn) {
+    preloginBtn.addEventListener('click', async () => {
+      const setStat = (msg, cls = '') => {
+        preloginStat.textContent = msg;
+        preloginStat.className = 'status' + (cls ? ' ' + cls : '');
+      };
+      const fd = new FormData(form);
+      const targetUrl = (fd.get('target_url') || '').trim();
+      const user = (fd.get('tester1_user') || '').trim();
+      const pass = (fd.get('tester1_pass') || '').trim();
+      const loginUrl = (preloginUrl.value || '').trim() || targetUrl;
+      if (!loginUrl) { setStat('請先填上方「目標 URL」，或在這欄填登入頁 URL', 'error'); return; }
+      if (!user || !pass) { setStat('請先填上方測試人員帳號與密碼', 'error'); return; }
+
+      preloginBtn.disabled = true;
+      setStat('登入中…');
+      try {
+        const res = await fetch('/api/prelogin', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ loginUrl, username: user, password: pass }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          const dbg = (data.debug || []).join(' | ');
+          setStat(`✗ 失敗：${data.reason || data.error || ('HTTP ' + res.status)}${dbg ? ' — ' + dbg : ''}`, 'error');
+          return;
+        }
+        storageTa.value = JSON.stringify(data.storageState);
+        setStat(`✓ ${data.reason}（已自動填入下方 Session 框）`, 'ok');
+      } catch (e) {
+        setStat('✗ 連線失敗：' + e.message, 'error');
+      } finally {
+        preloginBtn.disabled = false;
+      }
+    });
+  }
 })();

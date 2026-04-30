@@ -1,16 +1,18 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { loginIfPossible } from '../_shared/login';
 
 /**
  * Gremlins.js monkey test
  *
  * 對每個頁面：
- *   1. 訪問頁面
- *   2. 注入 gremlins.js（self-hosted，避免 CSP script-src 擋外部 CDN）
- *   3. 放出 gremlins（隨機點擊 / 打字 / 滾動）
- *   4. 監聽 window 'error' 與 console.error
- *   5. 若出現未處理的 JS error 則 fail
+ *   1. 若有 ADMIN_USERNAME/PASSWORD → 先登入（避開「整站被權限封住，monkey 只在登入頁亂點」）
+ *   2. 訪問頁面（已登入時，session cookie 會帶下去）
+ *   3. 注入 gremlins.js（self-hosted，避免 CSP script-src 擋外部 CDN）
+ *   4. 放出 gremlins（隨機點擊 / 打字 / 滾動）
+ *   5. 監聽 window 'error' 與 console.error
+ *   6. 若出現未處理的 JS error 則 fail
  */
 const PAGES = (process.env.MONKEY_PAGES || '/').split(',').map(s => s.trim()).filter(Boolean);
 const ATTACKS = parseInt(process.env.MONKEY_ATTACKS || '500', 10);
@@ -35,6 +37,10 @@ for (const pagePath of PAGES) {
       failedReqs.push({ url: req.url(), failure: req.failure()?.errorText || 'unknown' });
     });
 
+    // ① 先登入（若提供帳密）— 不成功也不擋執行，但會記錄到 attachment
+    const loginResult = await loginIfPossible(page);
+    console.log(`[monkey] login: ${JSON.stringify(loginResult)}`);
+
     const response = await page.goto(pagePath, {
       waitUntil: 'domcontentloaded',
       timeout: 30_000,
@@ -47,7 +53,7 @@ for (const pagePath of PAGES) {
 
     const summary = await page.evaluate(
       async ({ attacks, delay }) => {
-        // @ts-expect-error — gremlins global injected via CDN
+        // @ts-expect-error — gremlins global injected via evaluate
         const g = window.gremlins;
         const horde = g.createHorde({
           strategies: [g.strategies.distribution({ nb: attacks, delay })],
@@ -62,7 +68,7 @@ for (const pagePath of PAGES) {
 
     await test.info().attach('monkey-summary.json', {
       body: JSON.stringify(
-        { page: pagePath, summary, pageErrors, consoleErrors, failedReqs },
+        { page: pagePath, login: loginResult, summary, pageErrors, consoleErrors, failedReqs },
         null,
         2
       ),

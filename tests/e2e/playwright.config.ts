@@ -32,6 +32,9 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     ignoreHTTPSErrors: false,
+    // 若使用者上傳了 session（cookies + localStorage），Playwright 直接帶著進站 →
+    // 完全跳過登入頁，不會觸發 CAPTCHA / 2FA。沒提供時為 undefined（走 spec 內的表單登入）。
+    storageState: process.env.STORAGE_STATE_PATH || undefined,
   },
 
   projects: [

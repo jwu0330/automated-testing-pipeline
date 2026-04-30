@@ -1,0 +1,9 @@
+{
+  "name": "atp-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pipeline UI server. Playwright dep is for the 'open browser to login' flow that captures storageState.",
+  "dependencies": {
+    "playwright": "1.59.1"
+  }
+}

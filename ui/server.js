@@ -13,6 +13,7 @@
 // ════════════════════════════════════════════════════════════════
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -26,6 +27,9 @@ const LOCK = path.join(RUNTIME, 'lock');
 // 共用寄信模組（CLI 也用同一份；保證 UI / Skill 邏輯一致）
 const { loadDotenv, sendReportEmail } = require('../tests/scripts/lib/mailer');
 loadDotenv(ROOT);
+
+// 預先登入：純 Node HTTP，幫使用者擷取 session（避免他們手動 Cookie-Editor）
+const { httpLogin } = require('./lib/http-login');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const IS_WIN = process.platform === 'win32';
@@ -202,7 +206,45 @@ async function parseMultipart(req) {
 const envQuote = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
 
 // ─── Job 建立 + spawn 流程 ─────────────────────────────────
-function createJob({ targetUrl, targetUiUrl, scopes, openapi, email, testers }) {
+// 把使用者貼上的字串轉成 Playwright storageState 格式
+// - 貼 Playwright 原生格式：直接驗證後回傳
+// - 貼 Cookie-Editor 陣列：包成 storageState（origins 留空，cookies 補預設值）
+function normalizeStorageState(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { throw new Error('Session 不是合法 JSON：' + e.message); }
+
+  // Playwright storageState
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      && (Array.isArray(parsed.cookies) || Array.isArray(parsed.origins))) {
+    return {
+      cookies: Array.isArray(parsed.cookies) ? parsed.cookies : [],
+      origins: Array.isArray(parsed.origins) ? parsed.origins : [],
+    };
+  }
+
+  // Cookie-Editor 陣列
+  if (Array.isArray(parsed)) {
+    const cookies = parsed
+      .filter(c => c && typeof c === 'object' && c.name)
+      .map(c => ({
+        name:     String(c.name),
+        value:    String(c.value ?? ''),
+        domain:   String(c.domain ?? ''),
+        path:     String(c.path ?? '/'),
+        expires:  typeof c.expirationDate === 'number' ? c.expirationDate : (typeof c.expires === 'number' ? c.expires : -1),
+        httpOnly: !!c.httpOnly,
+        secure:   !!c.secure,
+        sameSite: ['Strict', 'Lax', 'None'].includes(c.sameSite) ? c.sameSite : 'Lax',
+      }));
+    if (cookies.length === 0) throw new Error('Cookie 陣列為空，請確認你在登入目標站之後才執行 Export');
+    return { cookies, origins: [] };
+  }
+
+  throw new Error('Session 格式無法辨識：應為 Playwright storageState 物件，或 Cookie-Editor 匯出陣列');
+}
+
+function createJob({ targetUrl, targetUiUrl, scopes, openapi, storageStateText, email, testers }) {
   const host = (() => { try { return new URL(targetUrl).hostname; } catch { return 'target'; } })();
   const jobId = new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(3).toString('hex');
   const jobDir = path.join(JOBS, jobId);
@@ -221,6 +263,15 @@ function createJob({ targetUrl, targetUiUrl, scopes, openapi, email, testers }) 
     openapiPath = path.join(testingDir, 'api', `openapi.${ext}`);
     fs.mkdirSync(path.dirname(openapiPath), { recursive: true });
     fs.writeFileSync(openapiPath, openapi.data);
+  }
+
+  // 寫入 storage-state.json（session）— 接受兩種格式並自動轉換成 Playwright storageState：
+  //   ① Playwright storageState：{"cookies":[...],"origins":[...]}
+  //   ② Cookie-Editor 匯出陣列：[{"name":"...","value":"...","domain":"...",...}, ...]
+  // run_e2e / run_monkey 會偵測 .testing/storage-state.json，自動 mount + 設 STORAGE_STATE_PATH
+  if (storageStateText && storageStateText.trim().length > 0) {
+    const normalized = normalizeStorageState(storageStateText);
+    fs.writeFileSync(path.join(testingDir, 'storage-state.json'), JSON.stringify(normalized));
   }
   const projectName = safeName(host) + '-' + jobId.slice(0, 10).replace(/[^\w-]/g, '');
   const yml =
@@ -305,10 +356,22 @@ tests: {}
         writeLog(`[ui] (no reports dir at ${targetReports})\n`);
       }
       // ③ tar.gz：把 .testing/reports 壓成 reports.tgz 裡的 reports/
+      // Windows 上走 WSL（跟其他 spawnBash 路徑一致），避免原生 tar.exe 處理 Windows 路徑時行為不穩
       const archive = path.join(jobDir, 'reports.tgz');
-      const tar = fs.existsSync(targetReports)
-        ? spawn('tar', ['-czf', archive, '-C', path.dirname(targetReports), 'reports'], { stdio: 'ignore' })
-        : { on: (ev, cb) => { if (ev === 'close') setImmediate(() => cb(1)); } };
+      let tar;
+      if (fs.existsSync(targetReports)) {
+        const archiveBash = bashPath(archive);
+        const parentBash  = bashPath(path.dirname(targetReports));
+        const tarArgv = ['tar', '-czf', archiveBash, '-C', parentBash, 'reports'];
+        tar = IS_WIN
+          ? spawn('wsl', ['-e', 'bash', '-lc', tarArgv.map(a => `'${String(a).replace(/'/g, `'\\''`)}'`).join(' ')])
+          : spawn(tarArgv[0], tarArgv.slice(1));
+        tar.stdout && tar.stdout.on('data', d => writeLog(d.toString()));
+        tar.stderr && tar.stderr.on('data', d => writeLog(`[tar] ${d.toString()}`));
+      } else {
+        writeLog(`[ui] no reports dir to archive: ${targetReports}\n`);
+        tar = { on: (ev, cb) => { if (ev === 'close') setImmediate(() => cb(1)); } };
+      }
       const afterArchive = (archiveOk) => {
         // ④ 寄信（若有填 email）— 走共用模組，跟 Skill CLI 同一份
         if (!email) {
@@ -330,8 +393,12 @@ tests: {}
           finish(rcode, archiveOk ? 'reports.tgz' : null);
         });
       };
-      tar.on('error', () => afterArchive(false));
-      tar.on('close', (tcode) => afterArchive(tcode === 0 && fs.existsSync(archive)));
+      tar.on('error', (e) => { writeLog(`[ui] tar spawn error: ${e.message}\n`); afterArchive(false); });
+      tar.on('close', (tcode) => {
+        const ok = tcode === 0 && fs.existsSync(archive);
+        if (!ok) writeLog(`[ui] tar failed: exit=${tcode}, archive_exists=${fs.existsSync(archive)}\n`);
+        afterArchive(ok);
+      });
     });
   });
   };
@@ -397,11 +464,126 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const openapi = (parsed.files.openapi || [])[0];
+    const openapi          = (parsed.files.openapi || [])[0];
+    const storageStateText = ((f.storage_state_text || [''])[0] || '').trim();
     let jobId;
-    try { jobId = createJob({ targetUrl, targetUiUrl, scopes, openapi, email, testers }); }
-    catch (e) { sendJSON(res, 500, { error: '無法建立任務：' + e.message }); return; }
+    try { jobId = createJob({ targetUrl, targetUiUrl, scopes, openapi, storageStateText, email, testers }); }
+    catch (e) { sendJSON(res, 400, { error: '無法建立任務：' + e.message }); return; }
     sendJSON(res, 200, { job_id: jobId });
+    return;
+  }
+
+  // POST /api/prelogin-browser — 跳出 Playwright 控制的瀏覽器視窗，由使用者手動登入
+  // 使用者關閉視窗時 Playwright 會把 storageState 存到指定檔，後端讀回來回傳 UI
+  // 這條路徑能處理 CAPTCHA / 2FA / SSO，因為實際登入動作是真人在做
+  if (req.method === 'POST' && pathname === '/api/prelogin-browser') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      let payload;
+      try { payload = JSON.parse(body || '{}'); }
+      catch { sendJSON(res, 400, { error: 'JSON 解析失敗' }); return; }
+      const loginUrl = String(payload.loginUrl || '').trim();
+      if (!/^https?:\/\//i.test(loginUrl)) {
+        sendJSON(res, 400, { ok: false, reason: '需提供合法 http(s) URL' }); return;
+      }
+
+      const tmpFile = path.join(os.tmpdir(), `atp-storage-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.json`);
+      let stderr = '';
+      let timedOut = false;
+
+      // Node 20+ 在 Windows 直接 spawn .cmd/.bat 會 EINVAL；必須走 shell。
+      // 引號 loginUrl 避免 shell 把 query string 的 & 當作分隔符切斷
+      const args = ['playwright', 'open', `--save-storage="${tmpFile}"`, `"${loginUrl}"`];
+      const cmdline = `npx ${args.join(' ')}`;
+      const child = spawn(cmdline, [], {
+        cwd: UI_DIR,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,
+      });
+      child.stderr.on('data', d => { stderr += d.toString(); });
+      child.stdout.on('data', d => { stderr += d.toString(); }); // 一起接 — Playwright 訊息常走 stdout
+
+      // 5 分鐘上限：使用者忘了關視窗也不會卡死
+      const killer = setTimeout(() => {
+        timedOut = true;
+        try { child.kill('SIGTERM'); } catch {}
+      }, 5 * 60 * 1000);
+
+      child.on('error', (e) => {
+        clearTimeout(killer);
+        sendJSON(res, 500, {
+          ok: false,
+          reason: `無法啟動 Playwright：${e.message}`,
+          hint: '請在 ui/ 目錄執行：npm install && npx playwright install chromium',
+        });
+      });
+
+      child.on('close', (code) => {
+        clearTimeout(killer);
+        if (timedOut) {
+          sendJSON(res, 504, { ok: false, reason: '超過 5 分鐘未關閉視窗，已強制終止' });
+          return;
+        }
+        if (!fs.existsSync(tmpFile)) {
+          sendJSON(res, 500, {
+            ok: false,
+            reason: `視窗結束但無 session 檔（exit=${code}）`,
+            stderr: stderr.slice(-500),
+            hint: 'Playwright 可能未安裝或 chromium 缺失：在 ui/ 執行 npm install && npx playwright install chromium',
+          });
+          return;
+        }
+        let ss;
+        try {
+          ss = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
+          fs.unlinkSync(tmpFile);
+        } catch (e) {
+          sendJSON(res, 500, { ok: false, reason: '讀取 session 檔失敗：' + e.message });
+          return;
+        }
+        const cookieCount = Array.isArray(ss.cookies) ? ss.cookies.length : 0;
+        const originCount = Array.isArray(ss.origins) ? ss.origins.length : 0;
+        if (cookieCount === 0 && originCount === 0) {
+          sendJSON(res, 200, {
+            ok: false,
+            reason: '視窗關閉時沒擷取到任何 cookie / storage — 可能視窗開了但沒實際登入',
+            storageState: ss,
+          });
+          return;
+        }
+        sendJSON(res, 200, {
+          ok: true,
+          reason: `擷取到 ${cookieCount} 個 cookie + ${originCount} 個 origin storage`,
+          storageState: ss,
+        });
+      });
+    });
+    return;
+  }
+
+  // POST /api/prelogin — 後端模擬登入並擷取 session，回傳 storageState JSON
+  // 給 UI 上「自動登入並擷取 session」按鈕用
+  if (req.method === 'POST' && pathname === '/api/prelogin') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      let payload;
+      try { payload = JSON.parse(body || '{}'); }
+      catch { sendJSON(res, 400, { error: 'JSON 解析失敗' }); return; }
+      const loginUrl = String(payload.loginUrl || '').trim();
+      const username = String(payload.username || '').trim();
+      const password = String(payload.password || '');
+      if (!/^https?:\/\//i.test(loginUrl)) { sendJSON(res, 400, { error: '需提供合法 http(s) 登入頁 URL' }); return; }
+      if (!username || !password) { sendJSON(res, 400, { error: '需提供帳號與密碼' }); return; }
+      try {
+        const r = await httpLogin({ loginUrl, username, password });
+        sendJSON(res, 200, r);
+      } catch (e) {
+        sendJSON(res, 500, { ok: false, reason: '預先登入流程例外：' + e.message });
+      }
+    });
     return;
   }
 

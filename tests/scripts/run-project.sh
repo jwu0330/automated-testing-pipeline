@@ -66,6 +66,13 @@ TARGET_URL=$(yq -r '.project.target_url // ""' "$TESTING_YML")
 LOCAL_PATH=$(yq -r '.project.local_path // ""' "$TESTING_YML")
 PHP_VERSION=$(yq -r '.project.php_version // "8.1"' "$TESTING_YML")
 
+# 區分「URL-only 模式」：testing.yml 明確寫 local_path: "" 表示僅遠端測試
+# 即使後面 fallback 把 LOCAL_PATH 補成 REG_PATH 也不影響此判斷
+URL_ONLY=false
+if [ -z "$LOCAL_PATH" ] || [ "$LOCAL_PATH" = "null" ]; then
+    URL_ONLY=true
+fi
+
 # v1 back-compat：若 testing.yml 沒寫 local_path，fallback 到 registry 的 path
 if [ -z "$LOCAL_PATH" ] || [ "$LOCAL_PATH" = "null" ]; then
     LOCAL_PATH="$REG_PATH"
@@ -104,6 +111,10 @@ if [ -n "$PROJECT_PATH" ] && [ -f "$PROJECT_PATH/.testing/.env" ]; then
 fi
 
 export TARGET_URL PROJECT_NAME="$NAME"
+# 給 summarize.js 用：URL-only 模式下，static/trivy 結構上不可能有報告，
+# 摘要應整段省略，避免使用者誤以為「漏跑了」
+# 注意用 URL_ONLY（從 testing.yml 直接判定），不要用 LOCAL_MODE（會被 fallback 影響）
+export LOCAL_MODE URL_ONLY
 
 # ─── reports 目錄（raw/ 放原始輸出）─────────────────────────
 # 設計原則：這個 repo 是工具，不應儲存其他專案的測試結果。
@@ -322,28 +333,72 @@ run_static() {
 }
 
 # ─── 09 Web - E2E Tests ───
+# 兩種模式：
+#   ① 本地模式（LOCAL_MODE=true 且 .testing/e2e/package.json 存在）
+#      → 跑專案自己的 spec.ts（業務邏輯）
+#   ② URL-only 模式
+#      → 跑 pipeline 自帶的泛用 spec：smoke + 安全標頭 + 登入驗證
+#      → 登入優先用 STORAGE_STATE_PATH（session），fallback 表單登入
 run_e2e() {
-    enabled e2e || { echo "⏭  09 Web - E2E Tests：略過（無 .testing/e2e/package.json）"; return 0; }
+    # 尊重 testing.yml 的明確關閉：tests.e2e.enabled = false → 略過
+    local e2e_override
+    e2e_override=$(yq -r '.tests.e2e.enabled // "auto"' "$TESTING_YML")
+    if [ "$e2e_override" = "false" ]; then
+        echo "⏭  09 Web - E2E Tests：略過（testing.yml 關閉）"
+        WARNINGS+=("e2e：testing.yml 關閉（tests.e2e.enabled=false）")
+        return 0
+    fi
     echo ""
     echo "▶ 09 Web - E2E Tests (Playwright)"
     echo "──────────────────────────────────────────"
     local env_args=()
     [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
-    docker run --rm "${env_args[@]}" \
-        -e TARGET_URL="$TARGET_URL" \
-        -v "$PROJECT_PATH/.testing/e2e:/e2e" \
-        -v "$REPORTS_RAW:/reports" \
-        -w /e2e \
-        mcr.microsoft.com/playwright:v1.59.1-noble \
-        sh -c '
-            if [ -f package-lock.json ]; then
-                npm ci --no-audit --no-fund
-            else
-                npm install --no-audit --no-fund
-            fi && \
-            npx playwright test
-        ' \
-        || echo "  (playwright 結束碼 $?)"
+
+    # 偵測 storageState：使用者上傳的 session 檔（cookies+localStorage）
+    local storage_mount=()
+    local storage_env=()
+    if [ -n "$PROJECT_PATH" ] && [ -f "$PROJECT_PATH/.testing/storage-state.json" ]; then
+        storage_mount=(-v "$PROJECT_PATH/.testing/storage-state.json:/work/storage-state.json:ro")
+        storage_env=(-e STORAGE_STATE_PATH=/work/storage-state.json)
+        echo "  ✓ 偵測到 session 檔 → 跳過表單登入，直接帶 cookie 進站"
+    fi
+
+    if $LOCAL_MODE && [ -f "$PROJECT_PATH/.testing/e2e/package.json" ]; then
+        # ① 本地模式：跑專案自備 spec
+        docker run --rm "${env_args[@]}" "${storage_env[@]}" \
+            -e TARGET_URL="$TARGET_URL" \
+            -v "$PROJECT_PATH/.testing/e2e:/work" \
+            "${storage_mount[@]}" \
+            -v "$REPORTS_RAW:/reports" \
+            -w /work \
+            mcr.microsoft.com/playwright:v1.59.1-noble \
+            sh -c '
+                if [ -f package-lock.json ]; then
+                    npm ci --no-audit --no-fund || npm install --no-audit --no-fund --no-package-lock
+                else
+                    npm install --no-audit --no-fund
+                fi && \
+                npx playwright test
+            ' \
+            || echo "  (playwright 結束碼 $?)"
+    else
+        # ② URL-only 模式：跑 pipeline 自帶的泛用 spec
+        echo "  ℹ️  URL-only 模式 → 使用 pipeline 內建泛用 E2E（smoke + 安全標頭 + 登入驗證）"
+        docker run --rm "${env_args[@]}" "${storage_env[@]}" \
+            -e TARGET_URL="$TARGET_URL" \
+            -v "$ROOT/tests/e2e:/work" \
+            -v "$ROOT/tests/_shared:/work/_shared:ro" \
+            "${storage_mount[@]}" \
+            -v "$REPORTS_RAW:/reports" \
+            -w /work \
+            mcr.microsoft.com/playwright:v1.59.1-noble \
+            sh -c '
+                npm install --no-audit --no-fund --no-package-lock && \
+                npx playwright install chromium --with-deps && \
+                npx playwright test --project=chromium
+            ' \
+            || echo "  (playwright 結束碼 $?)"
+    fi
     echo "  報告：$REPORTS_RAW/playwright/index.html"
 }
 
@@ -395,12 +450,22 @@ run_monkey() {
     rm -rf "$REPORTS_RAW/monkey-html" 2>/dev/null || true
     # 只 mount 原始碼，不 mount node_modules（Windows 路徑的 binary 在 Linux container 無法執行）
     # container 在 /work 裡自行安裝乾淨的 Linux 版套件
-    docker run --rm "${env_args[@]}" \
+    # 偵測 session 檔：有的話 Playwright 直接帶 cookie 進站，繞過 CAPTCHA
+    local storage_mount=()
+    local storage_env=()
+    if [ -n "$PROJECT_PATH" ] && [ -f "$PROJECT_PATH/.testing/storage-state.json" ]; then
+        storage_mount=(-v "$PROJECT_PATH/.testing/storage-state.json:/work/storage-state.json:ro")
+        storage_env=(-e STORAGE_STATE_PATH=/work/storage-state.json)
+        echo "  ✓ 偵測到 session 檔 → 跳過表單登入，monkey 直接帶 cookie"
+    fi
+    docker run --rm "${env_args[@]}" "${storage_env[@]}" \
         -e TARGET_URL="$TARGET_URL" \
         -e MONKEY_PAGES="$pages" \
         -e MONKEY_ATTACKS="$attacks" \
         -e MONKEY_DELAY_MS="$delay" \
         -v "$ROOT/tests/monkey/tests:/work/tests:ro" \
+        -v "$ROOT/tests/_shared:/work/_shared:ro" \
+        "${storage_mount[@]}" \
         -v "$ROOT/tests/monkey/playwright.config.ts:/work/playwright.config.ts:ro" \
         -v "$ROOT/tests/monkey/package.json:/work/package.json:ro" \
         -v "$ROOT/tests/monkey/package-lock.json:/work/package-lock.json:ro" \
@@ -408,7 +473,7 @@ run_monkey() {
         -w /work \
         mcr.microsoft.com/playwright:v1.59.1-noble \
         sh -c '
-            npm ci --no-audit --no-fund && \
+            npm install --no-audit --no-fund --no-package-lock && \
             npx playwright install chromium --with-deps && \
             npx playwright test
         ' \

@@ -454,13 +454,16 @@ const sslTrend = (prev?.ssl?.grade && s.grade && s.grade !== 'N/A')
   ? (prev.ssl.grade === s.grade ? '  [=]' : `  [${prev.ssl.grade} → ${s.grade}]`) : '';
 L.push(`① SSL/TLS         ${s.status === 'no-report' ? '(無報告)' : `${s.grade}  (${s.score}/100)${sslTrend}`}`);
 
-// ②
-if (ps.status === 'no-report') {
-  L.push('② 靜態分析        (無報告)');
-} else if (ps.status === 'parse-error') {
-  L.push(`② 靜態分析        解析失敗：${ps.error}`);
-} else {
-  L.push(`② 靜態分析        ${ps.total} 個錯誤${trend(ps.total, prev?.static)}`);
+// ② 靜態分析：URL-only 模式（無 local_path）整段省略 — 沒原始碼就跑不了 PHPStan
+const urlOnly = process.env.URL_ONLY === 'true';
+if (!urlOnly || ps.status !== 'no-report') {
+  if (ps.status === 'no-report') {
+    L.push('② 靜態分析        (無報告)');
+  } else if (ps.status === 'parse-error') {
+    L.push(`② 靜態分析        解析失敗：${ps.error}`);
+  } else {
+    L.push(`② 靜態分析        ${ps.total} 個錯誤${trend(ps.total, prev?.static)}`);
+  }
 }
 
 // ③
@@ -493,9 +496,10 @@ if (api.status === 'no-report') {
   L.push(`⑤ API 測試        ${passLine}${trend(api.totalFails, prev?.api?.totalFails)}`);
 }
 
-// ⑥
+// ⑥ E2E：URL-only 模式下用 pipeline 內建泛用 spec（smoke + 安全標頭 + 登入驗證），
+// 所以即使無 local_path 也會有報告 → 一律顯示
 if (pw.status === 'no-report') {
-  L.push('⑥ E2E             (未啟用)');
+  L.push('⑥ E2E             (無報告)');
 } else if (pw.status === 'parse-error') {
   L.push(`⑥ E2E             解析失敗：${pw.error}`);
 } else {
@@ -532,16 +536,18 @@ if (mk.status === 'no-report') {
   L.push(`⑨ 互動探測        ${pass}/${mk.tests} pass${trend(mk.failures, prev?.monkey?.failures)}`);
 }
 
-// ⑩ Trivy
+// ⑩ Trivy：URL-only 模式整段省略 — 需要本地原始碼樹掃 lockfile/Dockerfile
 const tvTotal = tv.status ? null : (tv.total + (tv.secrets?.length || 0) + (tv.misconfigs?.length || 0));
-if (tv.status === 'no-report') {
-  L.push('⑩ 供應鏈          (未啟用)');
-} else if (tv.status === 'parse-error') {
-  L.push(`⑩ 供應鏈          解析失敗：${tv.error}`);
-} else {
-  const secCnt = tv.secrets?.length || 0;
-  const misCnt = tv.misconfigs?.length || 0;
-  L.push(`⑩ 供應鏈          C=${tv.CRITICAL} H=${tv.HIGH} M=${tv.MEDIUM}  secrets=${secCnt}  misconfig=${misCnt}${trend(tvTotal, prev?.trivy?.total)}`);
+if (!urlOnly || tv.status !== 'no-report') {
+  if (tv.status === 'no-report') {
+    L.push('⑩ 供應鏈          (未啟用)');
+  } else if (tv.status === 'parse-error') {
+    L.push(`⑩ 供應鏈          解析失敗：${tv.error}`);
+  } else {
+    const secCnt = tv.secrets?.length || 0;
+    const misCnt = tv.misconfigs?.length || 0;
+    L.push(`⑩ 供應鏈          C=${tv.CRITICAL} H=${tv.HIGH} M=${tv.MEDIUM}  secrets=${secCnt}  misconfig=${misCnt}${trend(tvTotal, prev?.trivy?.total)}`);
+  }
 }
 
 // ⑪ Lychee
@@ -555,6 +561,55 @@ if (lc.status === 'no-report') {
 
 L.push('```');
 L.push('');
+
+// ─── 登入狀態（若有跑 monkey 或 e2e）─────────────────────
+// login.ts 在 container 內寫到 /reports/login-status.json，host 端就在 raw/login-status.json
+const loginStatusPath = path.join(RAW, 'login-status.json');
+if (fs.existsSync(loginStatusPath)) {
+  try {
+    const ls = JSON.parse(read(loginStatusPath));
+    const r = ls.result || {};
+    const sc = ls.scenario || {};
+    L.push('## 登入狀態');
+    L.push('');
+    if (r.success) {
+      L.push(`- ✅ 登入成功（模式：**${sc.mode}**）`);
+      if (r.finalUrl) L.push(`- 最終 URL：\`${r.finalUrl}\``);
+    } else {
+      L.push(`- ⚠️ 登入未成功 — 不影響後續測試，但**已登入後才能看到的內容掃不到**`);
+      L.push('');
+      L.push('**情境**');
+      L.push(`- 目標 URL：\`${sc.targetUrl || '(未提供)'}\``);
+      L.push(`- 模式：**${sc.mode}**（session=${sc.hasStorageState ? '有' : '無'}，帳密=${sc.hasCreds ? '有' : '無'}）`);
+      if (sc.landingUrl) L.push(`- 訪問後 landing URL：\`${sc.landingUrl}\``);
+      L.push('');
+      L.push('**動作**');
+      for (const a of (ls.actions || [])) L.push(`- ${a}`);
+      L.push('');
+      L.push('**回報**');
+      L.push(`- 是否嘗試登入：${r.attempted ? '是' : '否（前置條件不足）'}`);
+      L.push(`- 失敗原因：${r.reason}`);
+      if (r.finalUrl) L.push(`- 最終 URL：\`${r.finalUrl}\``);
+      L.push('');
+      L.push('**建議**');
+      if (sc.mode === 'form') {
+        L.push('- 若目標站有 CAPTCHA / 2FA / 登入後跳轉 JS 防護 → 改用「Session 貼上」');
+        L.push('  方式：在自己瀏覽器手動登入 → Cookie-Editor 擴充 Export → 貼到 UI 的 Session 欄位');
+      } else if (sc.mode === 'session') {
+        L.push('- session 失效常見原因：① cookie 已過期 ② domain 不符（例：登入頁是 `app.example.com` 但 TARGET_URL 是 `api.example.com`）③ 漏了 HttpOnly session cookie');
+        L.push('- 重新從瀏覽器 Cookie-Editor Export 一份貼上');
+      } else {
+        L.push('- 目前是匿名模式，未提供帳密也未上傳 session — 若需要登入後才能看到的測試覆蓋，請補上其中一個');
+      }
+    }
+    L.push('');
+  } catch (e) {
+    L.push('## 登入狀態');
+    L.push('');
+    L.push(`- 解析 \`raw/login-status.json\` 失敗：${e.message}`);
+    L.push('');
+  }
+}
 
 // ─── 詳細 ────────────────────────────────────────────────
 L.push('## 詳細');

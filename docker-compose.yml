@@ -72,6 +72,8 @@ services:
     container_name: nuclei-scanner
     volumes:
       - ${REPORTS_RAW_DIR:-./reports}:/reports
+      # 持久化模板：第一次跑會自動下載，後續沿用，避免每次都得抓
+      - nuclei-templates:/root/nuclei-templates
     env_file:
       - .env
     environment:
@@ -79,6 +81,7 @@ services:
       - NUCLEI_SEVERITY=${NUCLEI_SEVERITY:-critical,high,medium}
       - NUCLEI_RATE_LIMIT=${NUCLEI_RATE_LIMIT:-50}
     # 用 sh 包起來避免 compose 在命令插值時吃掉空字串；同時把 jsonl 輸出到已知路徑
+    # 不能加 -disable-update-check：image 內無預載模板，禁用 update 後 nuclei 會以 "no templates" 立刻終止
     entrypoint:
       - /bin/sh
       - -c
@@ -91,7 +94,6 @@ services:
         -rate-limit "$$NUCLEI_RATE_LIMIT"
         -stats-interval 10
         -no-color
-        -disable-update-check
         -silent
         || echo "nuclei exit $$?"
     profiles:
@@ -168,4 +170,7 @@ services:
     profiles:
       - e2e
       - all
+
+volumes:
+  nuclei-templates:
 
