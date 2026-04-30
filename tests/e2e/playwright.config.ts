@@ -8,9 +8,6 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * 各專案應複製此檔到 <project>/.testing/e2e/ 並依需求覆寫。
  *
- * 2026-04-30：session 流程預設停用（目標站多數已關後端 auth）。
- *   storageState 參數刻意不讀 STORAGE_STATE_PATH——pipeline 跑這支 spec 時
- *   不再注入 cookies；要手動恢復 session 模式請自行覆寫。
  */
 export default defineConfig({
   testDir: './tests',

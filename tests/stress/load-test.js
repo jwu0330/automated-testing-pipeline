@@ -6,16 +6,11 @@
 //       的延遲不是真實後台 API。
 //   新：吃 testing.yml 的 tests.stress.journeys，每個 journey 自帶
 //       weight / auth / steps，VU 依 weight 分到對應 scenario。
-//       auth=true 的 journey 會把 TARGET_COOKIE 帶上去（run-project.sh
-//       已從 storage-state.json 抽好給 env），匿名 journey 不帶 cookie。
-//
 // 環境變數：
 //   TARGET_URL          必填
 //   K6_VUS / K6_DURATION  總 VUs 與時長（預設 10 / 30s）
 //   JOURNEYS_JSON       JSON 陣列：[{name, weight, auth, steps:[...]}, ...]
 //                       未提供 → 退化為單一匿名 journey 跑首頁
-//   TARGET_COOKIE       選填；auth=true 的 journey 會帶上去
-//
 // step 格式：
 //   "GET /api/dashboard"
 //   "POST /api/orders {\"item_id\":1}"
@@ -34,7 +29,6 @@ import { check, sleep } from 'k6';
 const TARGET = (__ENV.TARGET_URL || 'https://example.com').replace(/\/$/, '');
 const TOTAL_VUS = parseInt(__ENV.K6_VUS || '10', 10);
 const DURATION = __ENV.K6_DURATION || '30s';
-const COOKIE = __ENV.TARGET_COOKIE || '';
 
 // ─── 解析 journeys ────────────────────────────────────────────
 function parseJourneys() {
@@ -48,7 +42,7 @@ function parseJourneys() {
     return arr.map((j, i) => ({
       name: (j.name || `journey_${i}`).replace(/[^a-zA-Z0-9_]/g, '_'),
       weight: typeof j.weight === 'number' && j.weight > 0 ? j.weight : 100,
-      auth: !!j.auth,
+      auth: false,
       steps: Array.isArray(j.steps) ? j.steps : [],
     }));
   } catch (e) {
@@ -119,7 +113,7 @@ export function setup() {
   return {
     journeys: JOURNEYS.map(j => ({ name: j.name, auth: j.auth, steps: j.steps.length, weight: j.weight })),
     target: TARGET,
-    cookie_present: !!COOKIE,
+    cookie_present: false,
   };
 }
 
@@ -134,8 +128,7 @@ export default function () {
     sleep(1);
     return;
   }
-
-  const baseHeaders = journey.auth && COOKIE ? { Cookie: COOKIE } : {};
+  const baseHeaders = {};
 
   for (const rawStep of journey.steps) {
     const { method, path, body, headers } = parseStep(rawStep);

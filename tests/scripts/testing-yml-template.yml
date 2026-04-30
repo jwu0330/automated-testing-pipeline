@@ -42,9 +42,7 @@ tests:
     openapi: local/doc/openapi.yaml
 
 # ─── 2026-04-30 起：認證流程預設停用 ───────────────────────────
-# 目標站多數已關後端 token 驗證，pipeline 不再做 session 擷取 / cookie 注入。
 # 想恢復登入流程的舊行為（極少數情況）：在 .testing/.env 設 LOGIN_REQUIRED=true，
-# 並補上 ADMIN_USERNAME / ADMIN_PASSWORD 或 storage-state.json。
 # 完整背景見 docs/auth-coverage-plan.md（保留為歷史紀錄）。
 # ────────────────────────────────────────────────────────────
 

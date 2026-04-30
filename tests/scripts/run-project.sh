@@ -126,18 +126,7 @@ export LOCAL_MODE URL_ONLY
 
 # ─── Auth 預設關閉（2026-04-30 起）─────────────────────────────
 #
-# 目標站絕大多數已關後端 token 驗證、UI 是裝飾品；prelogin-browser /
-# capture-session / storage-state 全條路徑「保留 code、預設不呼叫」。
-# 這裡一律不解析 auth.* 設定；STORAGE_STATE_PATH 與 TARGET_COOKIE 一律空字串
-# export 出去，讓 docker-compose 的 ZAP/Lychee/Nuclei wrapper 在「無 cookie」
-# 分支跑（wrapper 內已有 [ -n "$TARGET_COOKIE" ] 判斷，自動 no-op）。
-#
-# k6 journey-based 與 Lighthouse 多頁仍生效——只是裡面 auth=true 的 journey/頁
-# 因為沒 cookie 也只會匿名打。這跟「目標站本來就無 auth」相符。
-# ─────────────────────────────────────────────────────────────────
-STORAGE_STATE_PATH=""
-TARGET_COOKIE=""
-export STORAGE_STATE_PATH TARGET_COOKIE
+# Login is form-based only; captured browser state replay is disabled.
 
 # 1) JOURNEYS_JSON：給 k6 用（auth 全當 false，cookie 一律不帶）
 #    若 testing.yml 有 tests.stress.journeys → 直接用
@@ -147,7 +136,7 @@ if command -v node >/dev/null 2>&1; then
     JOURNEYS_JSON=$(node -e '
       const s = JSON.parse(process.argv[1] || "{}");
       if (Array.isArray(s.journeys) && s.journeys.length) {
-        process.stdout.write(JSON.stringify(s.journeys));
+        process.stdout.write(JSON.stringify(s.journeys.map(j => ({ ...j, auth: false }))));
       } else if (Array.isArray(s.pages) && s.pages.length) {
         process.stdout.write(JSON.stringify([{
           name: "anon", weight: 100, auth: false,
@@ -200,14 +189,6 @@ fi
 REPORTS_RAW="$REPORTS_DIR/raw"
 mkdir -p "$REPORTS_RAW"
 
-# ─── 合併 n8n precheck 階段寫進來的 warnings（若有）──
-if [ -f "$REPORTS_DIR/n8n-precheck-warnings.txt" ]; then
-    while IFS= read -r line; do
-        [ -n "$line" ] && WARNINGS+=("$line")
-    done < "$REPORTS_DIR/n8n-precheck-warnings.txt"
-    # 讀完就刪，避免下次殘留
-    rm -f "$REPORTS_DIR/n8n-precheck-warnings.txt"
-fi
 
 # 給下游程式（compose volume 插值、summarize.js）使用的環境變數
 export REPORTS_DIR REPORTS_RAW
@@ -230,7 +211,7 @@ else
 fi
 echo "║  PHP：     $PHP_VERSION"
 echo "║  範圍：    $SCOPE"
-echo "║  Auth：    disabled（預設；session capture 流程已停用）"
+echo "║  Auth：    form login only（no captured-state replay）"
 echo "║  E2E 巡檢：max_depth=$CRAWL_MAX_DEPTH max_pages=$CRAWL_MAX_PAGES enabled=$CRAWL_ENABLED"
 echo "║  報告：    $REPORTS_DIR/"
 echo "╚══════════════════════════════════════════════════╝"
@@ -419,7 +400,6 @@ run_static() {
 #      → 跑專案自己的 spec.ts（業務邏輯）
 #   ② URL-only 模式
 #      → 跑 pipeline 自帶的泛用 spec：smoke + 安全標頭 + 登入驗證
-#      → 登入優先用 STORAGE_STATE_PATH（session），fallback 表單登入
 run_e2e() {
     # 尊重 testing.yml 的明確關閉：tests.e2e.enabled = false → 略過
     local e2e_override
@@ -435,11 +415,7 @@ run_e2e() {
     local env_args=()
     [ -n "$PROJECT_ENV" ] && env_args=(--env-file="$PROJECT_ENV")
 
-    # 2026-04-30 起 session 流程預設停用；storage_mount 一律空陣列
-    # （留變數以維持後續 docker run 命令結構不變，未來若要恢復 session 模式再填）
-    local storage_mount=()
-    local storage_env=()
-
+    # 2026-04-30 起不再掛載 captured browser state。
     # E2E 巡檢需要的 crawl 設定，從 host env 透傳到 container
     local crawl_env=(
         -e CRAWL_MAX_DEPTH="$CRAWL_MAX_DEPTH"
@@ -451,10 +427,9 @@ run_e2e() {
 
     if $LOCAL_MODE && [ -f "$PROJECT_PATH/.testing/e2e/package.json" ]; then
         # ① 本地模式：跑專案自備 spec
-        docker run --rm "${env_args[@]}" "${storage_env[@]}" "${crawl_env[@]}" \
+        docker run --rm "${env_args[@]}" "${crawl_env[@]}" \
             -e TARGET_URL="$TARGET_URL" \
             -v "$PROJECT_PATH/.testing/e2e:/work" \
-            "${storage_mount[@]}" \
             -v "$REPORTS_RAW:/reports" \
             -w /work \
             mcr.microsoft.com/playwright:v1.59.1-noble \
@@ -470,11 +445,10 @@ run_e2e() {
     else
         # ② URL-only 模式：跑 pipeline 自帶的泛用 spec（含 crawl）
         echo "  ℹ️  URL-only 模式 → 使用 pipeline 內建泛用 E2E（smoke + 安全標頭 + 全頁巡檢）"
-        docker run --rm "${env_args[@]}" "${storage_env[@]}" "${crawl_env[@]}" \
+        docker run --rm "${env_args[@]}" "${crawl_env[@]}" \
             -e TARGET_URL="$TARGET_URL" \
             -v "$ROOT/tests/e2e:/work" \
             -v "$ROOT/tests/_shared:/work/_shared:ro" \
-            "${storage_mount[@]}" \
             -v "$REPORTS_RAW:/reports" \
             -w /work \
             mcr.microsoft.com/playwright:v1.59.1-noble \
@@ -525,7 +499,7 @@ run_lighthouse() {
           const auth = a.filter(x => x.auth).length;
           process.stdout.write(`頁面：${total}（其中 auth=${auth}）`);
         ' "$LIGHTHOUSE_PAGES_JSON" 2>/dev/null || echo "頁面：?")
-        echo "  $lh_summary  | Cookie：$([ -n "$TARGET_COOKIE" ] && echo '✓' || echo '✗')"
+        echo "  $lh_summary"
     fi
     # 清理舊 lighthouse 報告（只留本次）
     rm -f "$REPORTS_RAW"/lighthouse-*.report.* "$REPORTS_RAW/lighthouse-manifest.json" 2>/dev/null || true
@@ -550,22 +524,13 @@ run_monkey() {
     rm -rf "$REPORTS_RAW/monkey-html" 2>/dev/null || true
     # 只 mount 原始碼，不 mount node_modules（Windows 路徑的 binary 在 Linux container 無法執行）
     # container 在 /work 裡自行安裝乾淨的 Linux 版套件
-    # session 檔：用前置已解析的 STORAGE_STATE_PATH，Playwright 直接帶 cookie 繞過 CAPTCHA
-    local storage_mount=()
-    local storage_env=()
-    if [ -n "$STORAGE_STATE_PATH" ] && [ -f "$STORAGE_STATE_PATH" ]; then
-        storage_mount=(-v "$STORAGE_STATE_PATH:/work/storage-state.json:ro")
-        storage_env=(-e STORAGE_STATE_PATH=/work/storage-state.json)
-        echo "  ✓ 載入 session 檔 → 跳過表單登入，monkey 直接帶 cookie"
-    fi
-    docker run --rm "${env_args[@]}" "${storage_env[@]}" \
+    docker run --rm "${env_args[@]}" \
         -e TARGET_URL="$TARGET_URL" \
         -e MONKEY_PAGES="$pages" \
         -e MONKEY_ATTACKS="$attacks" \
         -e MONKEY_DELAY_MS="$delay" \
         -v "$ROOT/tests/monkey/tests:/work/tests:ro" \
         -v "$ROOT/tests/_shared:/work/_shared:ro" \
-        "${storage_mount[@]}" \
         -v "$ROOT/tests/monkey/playwright.config.ts:/work/playwright.config.ts:ro" \
         -v "$ROOT/tests/monkey/package.json:/work/package.json:ro" \
         -v "$ROOT/tests/monkey/package-lock.json:/work/package-lock.json:ro" \

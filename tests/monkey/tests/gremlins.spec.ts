@@ -8,7 +8,7 @@ import { loginIfPossible } from '../_shared/login';
  *
  * 對每個頁面：
  *   1. 若有 ADMIN_USERNAME/PASSWORD → 先登入（避開「整站被權限封住，monkey 只在登入頁亂點」）
- *   2. 訪問頁面（已登入時，session cookie 會帶下去）
+ *   2. 訪問頁面（已登入時，authenticated browser state 會帶下去）
  *   3. 注入 gremlins.js（self-hosted，避免 CSP script-src 擋外部 CDN）
  *   4. 放出 gremlins（隨機點擊 / 打字 / 滾動）
  *   5. 監聽 window 'error' 與 console.error

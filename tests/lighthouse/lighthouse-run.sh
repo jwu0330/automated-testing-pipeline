@@ -5,11 +5,9 @@
 # ENV:
 #   TARGET_URL                目標站（必填，結尾不帶 /）
 #   LIGHTHOUSE_PAGES_JSON     JSON 陣列：[{"path":"/", "auth":false}, ...]
-#                             auth=true 的頁會帶 TARGET_COOKIE 進去
 #   LIGHTHOUSE_PAGES          舊格式 fallback：空白分隔的相對路徑
 #                             （只有 LIGHTHOUSE_PAGES_JSON 沒給時才用）
 #   LIGHTHOUSE_PRESET         desktop / mobile（預設 desktop）
-#   TARGET_COOKIE             有的話，auth=true 的頁注入 Cookie 標頭
 #
 # 為什麼吃 JSON：舊版每頁只有 path 字串，無法表達「這頁要登入」。新版
 # 改吃 JSON 物件陣列。run-project.sh 會把 testing.yml 的 pages 正規化
@@ -54,7 +52,7 @@ echo "════════════════════════�
 echo " Lighthouse 前端品質檢測"
 echo " 目標：$TARGET"
 echo " 預設：$PRESET"
-echo " Cookie：$([ -n "${TARGET_COOKIE:-}" ] && echo '有（auth 頁會帶上）' || echo '無')"
+echo " Cookie: disabled (no captured-state replay)"
 echo "════════════════════════════════════════════"
 echo "$PAGES_TSV" | grep -c $'\t' >/dev/null 2>&1 || { echo "  ⚠️  無頁面可掃"; exit 0; }
 
@@ -68,20 +66,8 @@ while IFS=$'\t' read -r page auth; do
 
     url="${TARGET}${page}"
     out_base="$REPORT_DIR/lighthouse-${i}-${slug}"
-
-    auth_label=""
-    extra_args=()
-    if [ "$auth" = "1" ]; then
-        auth_label=" 🔒"
-        if [ -n "${TARGET_COOKIE:-}" ]; then
-            extra_args=(--extra-headers "{\"Cookie\":\"${TARGET_COOKIE}\"}")
-        else
-            echo "  ⚠️  $page 標記 auth=true 但 TARGET_COOKIE 為空 → 此頁可能被導去登入頁"
-        fi
-    fi
-
     echo ""
-    echo "[$i]${auth_label} $url"
+    echo "[$i] $url"
 
     set +e
     lighthouse "$url" \
@@ -93,7 +79,6 @@ while IFS=$'\t' read -r page auth; do
         --only-categories=performance,accessibility,best-practices,seo \
         --quiet \
         --no-update-notifier \
-        "${extra_args[@]}"
     rc=$?
     set -e
     if [ $rc -ne 0 ]; then

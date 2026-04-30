@@ -66,9 +66,9 @@
                   "});",
                   "",
                   "if (pm.response.code === 200) {",
-                  "    pm.test('Response includes token or session', function () {",
+                  "    pm.test('Response includes token', function () {",
                   "        var jsonData = pm.response.json();",
-                  "        pm.expect(jsonData).to.have.any.keys('token', 'session_id', 'access_token');",
+                  "        pm.expect(jsonData).to.have.any.keys('token', 'access_token');",
                   "    });",
                   "}"
                 ],

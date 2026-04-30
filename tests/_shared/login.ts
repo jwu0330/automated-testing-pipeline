@@ -2,20 +2,17 @@ import type { Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type LoginMode = 'session' | 'form' | 'anonymous';
+export type LoginMode = 'form' | 'anonymous';
 
 export type LoginAttempt = {
-  // ① 在什麼情況下
   scenario: {
     targetUrl: string;
     landingUrl: string;
     mode: LoginMode;
-    hasStorageState: boolean;
+    hasCapturedState: false;
     hasCreds: boolean;
   };
-  // ② 做了什麼事情
   actions: string[];
-  // ③ 回報內容
   result: {
     attempted: boolean;
     success: boolean;
@@ -28,15 +25,11 @@ export type LoginAttempt = {
 export type LoginResult = LoginAttempt['result'];
 
 /**
- * 啟發式登入（保留 code，預設不啟用）。
+ * Shared form-login helper for Playwright based tests.
  *
- * 2026-04-30 起：目標站多數已關後端 token 驗證、UI 是裝飾——預設**不嘗試**任何登入。
- * 要恢復舊行為，set env `LOGIN_REQUIRED=true`：
- *   1. 有 STORAGE_STATE_PATH → session 模式
- *   2. 有 ADMIN_USERNAME/PASSWORD → 表單模式
- *   3. 都沒有 → 匿名（與預設相同）
- *
- * 每次呼叫都會寫 /reports/login-status.json，summarize.js 會讀取後組成報告區塊。
+ * Captured browser-state login was removed on 2026-04-30.
+ * The pipeline still supports login, but only by submitting credentials to the target UI.
+ * No captured cookie or token is mounted or replayed.
  */
 export async function loginIfPossible(
   page: Page,
@@ -44,7 +37,6 @@ export async function loginIfPossible(
 ): Promise<LoginResult> {
   const targetUrl = opts?.uiUrl ?? process.env.TARGET_UI_URL ?? process.env.TARGET_URL ?? '';
   const loginRequired = (process.env.LOGIN_REQUIRED || '').toLowerCase() === 'true';
-  const hasStorageState = !!process.env.STORAGE_STATE_PATH;
   const user = opts?.user ?? process.env.ADMIN_USERNAME ?? '';
   const pass = opts?.pass ?? process.env.ADMIN_PASSWORD ?? '';
   const hasCreds = !!(user && pass);
@@ -54,8 +46,8 @@ export async function loginIfPossible(
     scenario: {
       targetUrl,
       landingUrl: '',
-      mode: !loginRequired ? 'anonymous' : (hasStorageState ? 'session' : (hasCreds ? 'form' : 'anonymous')),
-      hasStorageState,
+      mode: loginRequired && hasCreds ? 'form' : 'anonymous',
+      hasCapturedState: false,
       hasCreds,
     },
     actions,
@@ -68,92 +60,48 @@ export async function loginIfPossible(
     return r;
   };
 
-  // 預設停用登入流程：直接回傳「匿名」狀態，不訪問頁面、不檢查任何欄位
   if (!loginRequired) {
-    actions.push('LOGIN_REQUIRED 未設或為 false → 預設匿名模式（目標站視為無 auth）');
+    actions.push('LOGIN_REQUIRED is not true, so login is skipped.');
     return finalize({
       attempted: false,
       success: false,
-      reason: 'login disabled by default (LOGIN_REQUIRED!=true) — 視為已登入或目標無 auth',
+      reason: 'login disabled (LOGIN_REQUIRED!=true)',
     });
   }
 
-  // ① Session 模式：Playwright config 已套用 storageState，瀏覽器一開就帶 cookie
-  if (hasStorageState) {
-    actions.push(`使用上傳的 session 檔（STORAGE_STATE_PATH=${process.env.STORAGE_STATE_PATH}）`);
-    if (!targetUrl) {
-      return finalize({ attempted: false, success: false, reason: 'session 已套用但無 TARGET_URL，無法驗證' });
-    }
-    actions.push(`訪問 ${targetUrl} 驗證 session 有效性`);
-    // 兩階段：先 commit（任何 response 一回來就算成功 navigate），再嘗試 domcontentloaded
-    // 避免 SPA 的 Connect-Source / 第三方 script 卡住 domcontentloaded 把驗證搞垮
-    let gotoOk = true;
-    let gotoErr = '';
-    try {
-      await page.goto(targetUrl, { waitUntil: 'commit', timeout: opts?.timeoutMs ?? 60_000 });
-      // 給 DOM 一點時間 render；超時就拿目前狀態檢查，不算失敗
-      await page.waitForLoadState('domcontentloaded', { timeout: 20_000 }).catch(() => {});
-    } catch (e: any) {
-      gotoOk = false;
-      gotoErr = e.message;
-      actions.push(`page.goto 逾時：${e.message}（仍嘗試在當前 DOM 上檢查）`);
-    }
-    attempt.scenario.landingUrl = page.url() || targetUrl;
-    const pwCount = await page.locator('input[type=password]').count().catch(() => -1);
-    if (!gotoOk && pwCount < 0) {
-      return finalize({ attempted: true, success: false, reason: `訪問目標頁失敗：${gotoErr}` });
-    }
-    if (pwCount > 0) {
-      actions.push('偵測到頁面仍有 input[type=password] → 推斷 session 已過期或未對應到目標站');
-      return finalize({
-        attempted: true,
-        success: false,
-        reason: 'session 失效：訪問後仍出現登入頁的 password 欄位（cookie 過期 / domain 不符 / 未含 HttpOnly session）',
-        finalUrl: page.url(),
-      });
-    }
-    return finalize({
-      attempted: true,
-      success: true,
-      reason: gotoOk ? '使用上傳 session，訪問後未見登入頁' : `使用上傳 session — page.goto 雖逾時但已偵測不到登入頁（${gotoErr}）`,
-      finalUrl: page.url(),
-    });
-  }
-
-  // ② 匿名（沒帳密）
   if (!hasCreds) {
-    actions.push('未提供 ADMIN_USERNAME / ADMIN_PASSWORD，也未上傳 session → 以匿名身份繼續');
-    return finalize({ attempted: false, success: false, reason: 'no creds and no session — running anonymously' });
+    actions.push('ADMIN_USERNAME / ADMIN_PASSWORD were not provided.');
+    return finalize({ attempted: false, success: false, reason: 'no credentials provided' });
   }
 
-  // ③ 表單模式
   if (!targetUrl) {
-    return finalize({ attempted: false, success: false, reason: 'no TARGET_URL' });
+    return finalize({ attempted: false, success: false, reason: 'no TARGET_URL or TARGET_UI_URL' });
   }
+
   const navTimeout = opts?.timeoutMs ?? 30_000;
-  actions.push(`訪問 ${targetUrl} 找登入表單`);
+  actions.push(`Navigate to ${targetUrl}`);
   try {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: navTimeout });
   } catch (e: any) {
-    return finalize({ attempted: true, success: false, reason: `訪問目標頁失敗：${e.message}` });
+    return finalize({ attempted: true, success: false, reason: `navigation failed: ${e.message}` });
   }
   attempt.scenario.landingUrl = page.url();
 
   const pwField = page.locator('input[type=password]').first();
   if (!(await pwField.count())) {
-    actions.push('頁面上找不到 input[type=password] → 可能首頁本身就是登入後狀態，或登入入口在其他路徑');
+    actions.push('No password field was found; target may already be public or the login page differs.');
     return finalize({
       attempted: false,
       success: false,
-      reason: '目標頁無 password 欄位，無法自動登入（請改用 session 上傳，或檢查 TARGET_UI_URL 是否指向登入頁）',
+      reason: 'no password field found for form login',
       finalUrl: page.url(),
     });
   }
 
   const userSelectors = [
     'input[type=email]',
-    'input[name*="user" i]',  'input[name*="account" i]', 'input[name*="login" i]', 'input[name*="email" i]',
-    'input[id*="user" i]',    'input[id*="account" i]',   'input[id*="login" i]',   'input[id*="email" i]',
+    'input[name*="user" i]', 'input[name*="account" i]', 'input[name*="login" i]', 'input[name*="email" i]',
+    'input[id*="user" i]', 'input[id*="account" i]', 'input[id*="login" i]', 'input[id*="email" i]',
     'input[type=text]:not([type=hidden])',
   ];
   let userField: any = null;
@@ -163,42 +111,40 @@ export async function loginIfPossible(
     if (await cand.count()) { userField = cand; usedSelector = sel; break; }
   }
   if (!userField) {
-    actions.push('找到 password 欄位但找不到任何文字/Email 輸入欄 → 此頁可能不是標準登入表單');
+    actions.push('Password field found, but no username/email field was detected.');
     return finalize({
       attempted: false,
       success: false,
-      reason: '找到 password 但找不到 username 欄位（可能是非標準登入頁、或有 CAPTCHA 前置）',
+      reason: 'password field found but username field missing',
       finalUrl: page.url(),
     });
   }
-  actions.push(`找到欄位：username 用選擇器「${usedSelector}」，password 用「input[type=password]」`);
-  actions.push(`填入帳號 ${user}，密碼長度 ${pass.length}`);
+
+  actions.push(`Fill username via ${usedSelector} and password via input[type=password]`);
   await userField.fill(user);
   await pwField.fill(pass);
 
   const beforeUrl = page.url();
-  const submitBtn = page.locator('button[type=submit], input[type=submit], button:has-text("登入"), button:has-text("Login"), button:has-text("Sign in")').first();
+  const submit = page.locator('button[type=submit], input[type=submit], button:has-text("登入"), button:has-text("Login"), button:has-text("Sign in")').first();
   const settled = page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
-  if (await submitBtn.count()) {
-    actions.push('找到 submit 按鈕，點擊送出');
-    await submitBtn.click().catch((e: any) => actions.push(`submit 點擊例外：${e.message}`));
+  if (await submit.count()) {
+    await submit.click().catch((e: any) => actions.push(`submit click failed: ${e.message}`));
   } else {
-    actions.push('沒有 submit 按鈕，改在 password 欄位按 Enter');
-    await pwField.press('Enter').catch((e: any) => actions.push(`Enter 例外：${e.message}`));
+    await pwField.press('Enter').catch((e: any) => actions.push(`Enter submit failed: ${e.message}`));
   }
   await settled;
 
   const stillHasPw = (await page.locator('input[type=password]').count()) > 0;
   const urlChanged = page.url() !== beforeUrl;
-  actions.push(`送出後 URL ${urlChanged ? '已變化' : '未變化'}（${beforeUrl} → ${page.url()}），password 欄位${stillHasPw ? '仍存在' : '消失'}`);
-
   const success = urlChanged && !stillHasPw;
+  actions.push(`After submit: urlChanged=${urlChanged}, stillHasPassword=${stillHasPw}`);
+
   return finalize({
     attempted: true,
     success,
     reason: success
-      ? '表單登入成功'
-      : `表單登入失敗 — URL 變化=${urlChanged}、password 殘留=${stillHasPw}（常見原因：帳密錯誤、CAPTCHA、需要 2FA、登入頁有 JS 防護）`,
+      ? 'form login succeeded'
+      : `form login failed: urlChanged=${urlChanged}, stillHasPassword=${stillHasPw}`,
     finalUrl: page.url(),
   });
 }
@@ -209,6 +155,6 @@ function writeLoginStatus(attempt: LoginAttempt) {
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, JSON.stringify(attempt, null, 2));
   } catch {
-    // 不影響測試本身
+    // Reporting must never break the test itself.
   }
 }

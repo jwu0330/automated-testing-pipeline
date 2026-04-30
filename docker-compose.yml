@@ -22,7 +22,6 @@ services:
 
   # ─────────────────────────────────────
   # 資安掃描 (OWASP ZAP) — 包成 wrapper script，
-  # 有 TARGET_COOKIE 時自動注入 cookie 標頭（覆蓋已登入路徑）
   # ─────────────────────────────────────
   zap:
     image: ghcr.io/zaproxy/zaproxy:stable
@@ -34,7 +33,6 @@ services:
       - .env
     environment:
       - TARGET_URL=${TARGET_URL:?TARGET_URL 必填，請由 tests/scripts/run-project.sh 或 .env 提供}
-      - TARGET_COOKIE=${TARGET_COOKIE:-}
     entrypoint: ["/bin/sh", "/zap-scripts/run-zap.sh"]
     profiles:
       - security
@@ -43,7 +41,6 @@ services:
   # ─────────────────────────────────────
   # 壓力測試 (k6) — journey-based
   # JOURNEYS_JSON 由 run-project.sh 從 testing.yml 抽出後 export 進來
-  # auth=true 的 journey 會帶 TARGET_COOKIE
   # ─────────────────────────────────────
   k6:
     image: grafana/k6:latest
@@ -58,7 +55,6 @@ services:
       - K6_VUS=${K6_VUS:-10}
       - K6_DURATION=${K6_DURATION:-30s}
       - JOURNEYS_JSON=${JOURNEYS_JSON:-}
-      - TARGET_COOKIE=${TARGET_COOKIE:-}
     command: >
       run /scripts/load-test.js
         --out json=/reports/k6-results.json
@@ -69,7 +65,6 @@ services:
 
   # ─────────────────────────────────────
   # 深層資安掃描 (Nuclei) — 補 ZAP baseline
-  # 模板化弱點掃描（CVE / 錯誤配置 / 洩漏端點）；有 TARGET_COOKIE 時注入
   # ─────────────────────────────────────
   nuclei:
     image: projectdiscovery/nuclei:latest
@@ -83,7 +78,6 @@ services:
       - .env
     environment:
       - TARGET_URL=${TARGET_URL:?TARGET_URL 必填，請由 tests/scripts/run-project.sh 或 .env 提供}
-      - TARGET_COOKIE=${TARGET_COOKIE:-}
       - NUCLEI_SEVERITY=${NUCLEI_SEVERITY:-critical,high,medium}
       - NUCLEI_RATE_LIMIT=${NUCLEI_RATE_LIMIT:-50}
     entrypoint: ["/bin/sh", "/scripts/run-nuclei.sh"]
@@ -93,7 +87,6 @@ services:
 
   # ─────────────────────────────────────
   # 前端品質 (Lighthouse) — 效能 / A11y / 最佳實踐 / SEO
-  # 新增 LIGHTHOUSE_PAGES_JSON：[{path, auth}]；auth=true 的頁帶 TARGET_COOKIE
   # 舊 LIGHTHOUSE_PAGES（空白分隔字串）保留，run-project.sh 會擇一給
   # ─────────────────────────────────────
   lighthouse:
@@ -111,7 +104,6 @@ services:
       - LIGHTHOUSE_PAGES=${LIGHTHOUSE_PAGES:-/}
       - LIGHTHOUSE_PAGES_JSON=${LIGHTHOUSE_PAGES_JSON:-}
       - LIGHTHOUSE_PRESET=${LIGHTHOUSE_PRESET:-desktop}
-      - TARGET_COOKIE=${TARGET_COOKIE:-}
     entrypoint: ["/bin/bash", "/work/lighthouse-run.sh"]
     profiles:
       - lighthouse
@@ -119,7 +111,6 @@ services:
 
   # ─────────────────────────────────────
   # 連結檢查 (Lychee) — 壞連結 / 圖片 404
-  # 有 TARGET_COOKIE 時帶 Cookie 標頭，後台連結才掃得到
   # ─────────────────────────────────────
   lychee:
     image: lycheeverse/lychee:latest
@@ -131,7 +122,6 @@ services:
       - .env
     environment:
       - TARGET_URL=${TARGET_URL:?TARGET_URL 必填，請由 tests/scripts/run-project.sh 或 .env 提供}
-      - TARGET_COOKIE=${TARGET_COOKIE:-}
       - LYCHEE_MAX_CONCURRENCY=${LYCHEE_MAX_CONCURRENCY:-4}
       - LYCHEE_TIMEOUT=${LYCHEE_TIMEOUT:-15}
     entrypoint: ["/bin/sh", "/scripts/run-lychee.sh"]
@@ -161,4 +151,3 @@ services:
 
 volumes:
   nuclei-templates:
-

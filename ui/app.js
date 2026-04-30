@@ -231,10 +231,6 @@
     window.location.href = downloadUrl;
   });
 
-  // 2026-04-30：prelogin-browser 視覺元素已從 index.html 拿掉，session 流程廢棄。
-  // 保留 /api/prelogin-browser 後端 endpoint（dead code，未來若要恢復再接回）。
-  // 這裡曾經有 browserBtn click handler，連同所屬 DOM 一併移除。
-
   // ─── 頁面載入時：若 localStorage 有活躍任務 → 重建進度 UI + 重連 SSE ───
   // SSE endpoint 會從 log 檔起點重播，且 status=done 時直接送 done event；
   // 所以「跑到一半重整」會看到當前進度，「跑完才重整」會收到 done → clearJob → 乾淨頁面

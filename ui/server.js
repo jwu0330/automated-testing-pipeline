@@ -13,7 +13,6 @@
 // ════════════════════════════════════════════════════════════════
 const http = require('http');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -27,12 +26,6 @@ const LOCK = path.join(RUNTIME, 'lock');
 // 共用寄信模組（CLI 也用同一份；保證 UI / Skill 邏輯一致）
 const { loadDotenv, sendReportEmail } = require('../tests/scripts/lib/mailer');
 loadDotenv(ROOT);
-
-// 共用 session 擷取模組（CLI 也用同一份）
-const { captureSession } = require('../tests/scripts/lib/session-capture');
-
-// 預先登入：純 Node HTTP，幫使用者擷取 session（避免他們手動 Cookie-Editor）
-const { httpLogin } = require('./lib/http-login');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const IS_WIN = process.platform === 'win32';
@@ -251,45 +244,7 @@ async function parseMultipart(req) {
 const envQuote = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
 
 // ─── Job 建立 + spawn 流程 ─────────────────────────────────
-// 把使用者貼上的字串轉成 Playwright storageState 格式
-// - 貼 Playwright 原生格式：直接驗證後回傳
-// - 貼 Cookie-Editor 陣列：包成 storageState（origins 留空，cookies 補預設值）
-function normalizeStorageState(raw) {
-  let parsed;
-  try { parsed = JSON.parse(raw); }
-  catch (e) { throw new Error('Session 不是合法 JSON：' + e.message); }
-
-  // Playwright storageState
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      && (Array.isArray(parsed.cookies) || Array.isArray(parsed.origins))) {
-    return {
-      cookies: Array.isArray(parsed.cookies) ? parsed.cookies : [],
-      origins: Array.isArray(parsed.origins) ? parsed.origins : [],
-    };
-  }
-
-  // Cookie-Editor 陣列
-  if (Array.isArray(parsed)) {
-    const cookies = parsed
-      .filter(c => c && typeof c === 'object' && c.name)
-      .map(c => ({
-        name:     String(c.name),
-        value:    String(c.value ?? ''),
-        domain:   String(c.domain ?? ''),
-        path:     String(c.path ?? '/'),
-        expires:  typeof c.expirationDate === 'number' ? c.expirationDate : (typeof c.expires === 'number' ? c.expires : -1),
-        httpOnly: !!c.httpOnly,
-        secure:   !!c.secure,
-        sameSite: ['Strict', 'Lax', 'None'].includes(c.sameSite) ? c.sameSite : 'Lax',
-      }));
-    if (cookies.length === 0) throw new Error('Cookie 陣列為空，請確認你在登入目標站之後才執行 Export');
-    return { cookies, origins: [] };
-  }
-
-  throw new Error('Session 格式無法辨識：應為 Playwright storageState 物件，或 Cookie-Editor 匯出陣列');
-}
-
-function createJob({ targetUrl, targetUiUrl, scopes, openapi, storageStateText, email, testers }) {
+function createJob({ targetUrl, targetUiUrl, scopes, openapi, email, testers }) {
   const host = (() => { try { return new URL(targetUrl).hostname; } catch { return 'target'; } })();
   const jobId = new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(3).toString('hex');
   const jobDir = path.join(JOBS, jobId);
@@ -308,19 +263,6 @@ function createJob({ targetUrl, targetUiUrl, scopes, openapi, storageStateText, 
     openapiPath = path.join(testingDir, 'api', `openapi.${ext}`);
     fs.mkdirSync(path.dirname(openapiPath), { recursive: true });
     fs.writeFileSync(openapiPath, openapi.data);
-  }
-
-  // 2026-04-30：session 流程已預設停用——run-project.sh 不再讀 storage-state.json，
-  // 即使這裡寫了也不生效。保留邏輯純粹為了「未來若 LOGIN_REQUIRED 流程恢復」時能直接接回；
-  // 目前在隱藏的 input 上設預設空字串，永遠進不來這個分支。
-  if (storageStateText && storageStateText.trim().length > 0) {
-    try {
-      const normalized = normalizeStorageState(storageStateText);
-      fs.writeFileSync(path.join(testingDir, 'storage-state.json'), JSON.stringify(normalized));
-    } catch (e) {
-      // 解析失敗不擋流程；session 已停用，這個檔最後也不會被讀
-      console.warn('[server] storage-state 解析失敗（已停用流程，忽略）：', e.message);
-    }
   }
   const projectName = safeName(host) + '-' + jobId.slice(0, 10).replace(/[^\w-]/g, '');
   const yml =
@@ -522,75 +464,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     const openapi          = (parsed.files.openapi || [])[0];
-    const storageStateText = ((f.storage_state_text || [''])[0] || '').trim();
     let jobId;
-    try { jobId = createJob({ targetUrl, targetUiUrl, scopes, openapi, storageStateText, email, testers }); }
+    try { jobId = createJob({ targetUrl, targetUiUrl, scopes, openapi, email, testers }); }
     catch (e) { sendJSON(res, 400, { error: '無法建立任務：' + e.message }); return; }
     sendJSON(res, 200, { job_id: jobId });
-    return;
-  }
-
-  // POST /api/prelogin-browser — 跳出 Playwright 控制的瀏覽器視窗，由使用者手動登入
-  // 使用者關閉視窗時 Playwright 會把 storageState 存到指定檔，後端讀回來回傳 UI
-  // 這條路徑能處理 CAPTCHA / 2FA / SSO，因為實際登入動作是真人在做
-  // 共用 backend：tests/scripts/lib/session-capture.js（CLI 走同一份）
-  if (req.method === 'POST' && pathname === '/api/prelogin-browser') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
-      let payload;
-      try { payload = JSON.parse(body || '{}'); }
-      catch { sendJSON(res, 400, { error: 'JSON 解析失敗' }); return; }
-      const loginUrl = String(payload.loginUrl || '').trim();
-      const username = String(payload.username || '').trim();
-      const password = String(payload.password || '');
-
-      const tmpFile = path.join(os.tmpdir(), `atp-storage-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.json`);
-      const r = await captureSession({
-        loginUrl,
-        outputPath: tmpFile,
-        uiCwd: UI_DIR,
-        username: username || undefined,
-        password: password || undefined,
-      });
-      // UI 流程：把 storageState 直接回給前端（前端會 JSON.stringify 進 textarea），
-      // 暫存檔不再保留
-      try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
-
-      if (r.ok) {
-        sendJSON(res, 200, { ok: true, reason: r.reason, storageState: r.storageState });
-        return;
-      }
-      // 區分錯誤類別給對應 HTTP code（保留原行為：URL 錯 400 / 逾時 504 / 其他 500 / 沒擷到 200）
-      if (/合法 http\(s\)/.test(r.reason || ''))            { sendJSON(res, 400, r); return; }
-      if (/超過.+未關閉/.test(r.reason || ''))              { sendJSON(res, 504, r); return; }
-      if (r.storageState)                                    { sendJSON(res, 200, r); return; }
-      sendJSON(res, 500, r);
-    });
-    return;
-  }
-
-  // POST /api/prelogin — 後端模擬登入並擷取 session，回傳 storageState JSON
-  // 給 UI 上「自動登入並擷取 session」按鈕用
-  if (req.method === 'POST' && pathname === '/api/prelogin') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
-      let payload;
-      try { payload = JSON.parse(body || '{}'); }
-      catch { sendJSON(res, 400, { error: 'JSON 解析失敗' }); return; }
-      const loginUrl = String(payload.loginUrl || '').trim();
-      const username = String(payload.username || '').trim();
-      const password = String(payload.password || '');
-      if (!/^https?:\/\//i.test(loginUrl)) { sendJSON(res, 400, { error: '需提供合法 http(s) 登入頁 URL' }); return; }
-      if (!username || !password) { sendJSON(res, 400, { error: '需提供帳號與密碼' }); return; }
-      try {
-        const r = await httpLogin({ loginUrl, username, password });
-        sendJSON(res, 200, r);
-      } catch (e) {
-        sendJSON(res, 500, { ok: false, reason: '預先登入流程例外：' + e.message });
-      }
-    });
     return;
   }
 

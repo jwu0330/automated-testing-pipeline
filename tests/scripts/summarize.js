@@ -5,7 +5,7 @@
 // 讀取：reports/<project>/raw/ 下的工具原始輸出
 // 產出：
 //   - reports/<project>/report.md    ← 人類可讀（摘要 + 詳細一檔）
-//   - reports/<project>/report.json  ← 結構化（給 n8n 用）
+//   - reports/<project>/report.json  ← structured report
 //   - reports/<project>/history.jsonl ← 歷史紀錄（append-only）
 //
 // 用法：node tests/scripts/summarize.js <project-name> [--json]
@@ -455,7 +455,7 @@ function parseLychee() {
   } catch (e) { return { status: 'parse-error', error: e.message }; }
 }
 
-// ─── ⓪ Warnings（來自 run-project.sh 的 WARNINGS[] / n8n Precheck）──
+// ─── ⓪ Warnings（來自 run-project.sh 的 WARNINGS[] / precheck）──
 function parseWarnings() {
   const p = path.join(REPORT_DIR, 'warnings.txt');
   if (!exists(p)) return [];
@@ -497,7 +497,7 @@ L.push('');
 if (warnings.length) {
   L.push('## 前置檢查警告');
   L.push('');
-  L.push(`共 ${warnings.length} 條警告（來自 run-project.sh 或 n8n Precheck）：`);
+  L.push(`共 ${warnings.length} 條警告（來自 run-project.sh 或 precheck）：`);
   L.push('');
   for (const w of warnings) {
     L.push(`- ⚠️  ${w}`);
@@ -670,7 +670,7 @@ if (fs.existsSync(loginStatusPath)) {
       L.push('');
       L.push('**情境**');
       L.push(`- 目標 URL：\`${sc.targetUrl || '(未提供)'}\``);
-      L.push(`- 模式：**${sc.mode}**（session=${sc.hasStorageState ? '有' : '無'}，帳密=${sc.hasCreds ? '有' : '無'}）`);
+      L.push(`- 模式：**${sc.mode}**（captured_state=${sc.hasCapturedState ? '有' : '無'}，帳密=${sc.hasCreds ? '有' : '無'}）`);
       if (sc.landingUrl) L.push(`- 訪問後 landing URL：\`${sc.landingUrl}\``);
       L.push('');
       L.push('**動作**');
@@ -683,13 +683,8 @@ if (fs.existsSync(loginStatusPath)) {
       L.push('');
       L.push('**建議**');
       if (sc.mode === 'form') {
-        L.push('- 若目標站有 CAPTCHA / 2FA / 登入後跳轉 JS 防護 → 改用「Session 貼上」');
-        L.push('  方式：在自己瀏覽器手動登入 → Cookie-Editor 擴充 Export → 貼到 UI 的 Session 欄位');
-      } else if (sc.mode === 'session') {
-        L.push('- session 失效常見原因：① cookie 已過期 ② domain 不符（例：登入頁是 `app.example.com` 但 TARGET_URL 是 `api.example.com`）③ 漏了 HttpOnly session cookie');
-        L.push('- 重新從瀏覽器 Cookie-Editor Export 一份貼上');
       } else {
-        L.push('- 目前是匿名模式，未提供帳密也未上傳 session — 若需要登入後才能看到的測試覆蓋，請補上其中一個');
+        L.push('- 目前是匿名模式，未提供帳密也未提供帳密 — 若需要登入後才能看到的測試覆蓋，請補上其中一個');
       }
     }
     L.push('');
@@ -854,7 +849,7 @@ if (!lh.status) {
   L.push(`平均：Perf=${lh.avg.performance} · A11y=${lh.avg.accessibility} · BP=${lh.avg.best_practices} · SEO=${lh.avg.seo}`);
   if (lh.pages.some(p => p.auth)) {
     L.push('');
-    L.push('🔒 = 該頁帶 cookie 載入（需 session）；分數低於匿名頁多半反映後台真實 perf。');
+    L.push('🔒 = 該頁帶 cookie 載入（需登入態）；分數低於匿名頁多半反映後台真實 perf。');
   }
   L.push('');
 }

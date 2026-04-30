@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { loginIfPossible } from '../_shared/login';
 
 /**
  * 全頁巡檢（Crawl）
@@ -14,6 +15,11 @@ import * as path from 'path';
  *   原本 login.spec / smoke.spec 只盯首頁；要回答「每個分頁都進得去嗎」就得
  *   寫一條會走連結的 spec。對「auth 已關」的目標站，這就是「真的有測到裡面」
  *   的訊號——使用者填的 TARGET_URL 進得去 → 進去後抓到的所有同源連結也都進得去。
+ *
+ * 登入流程（LOGIN_REQUIRED=true）：
+ *   先在同一個 page 上跑 loginIfPossible() 完成表單登入，然後把登入後的 page.url()
+ *   當作 BFS 起點。這樣 BFS 帶著 authenticated browser state，能爬到登入後的分頁；如果起點本來
+ *   是 /login.html，登入成功後通常會被導去儀表板/首頁，crawl 就從那裡開始。
  *
  * ENV：
  *   TARGET_URL                必填，巡檢起點
@@ -69,14 +75,39 @@ test.describe('全頁巡檢', () => {
     test.skip(!ENABLED, 'CRAWL_ENABLED=false → 跳過全頁巡檢');
     test.skip(!TARGET, 'TARGET_URL 未設，無從開始巡檢');
 
-    const startUrl = (() => {
+    const initialUrl = (() => {
       try {
         return new URL(TARGET).href;
       } catch {
         return '';
       }
     })();
-    test.skip(!startUrl, `TARGET_URL 不是合法 URL：${TARGET}`);
+    test.skip(!initialUrl, `TARGET_URL 不是合法 URL：${TARGET}`);
+
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+
+    // ─── 預先登入（LOGIN_REQUIRED=true 且有帳密時）─────────────
+    // 在同一個 page 上完成登入，後續 BFS 直接帶著 authenticated browser state 走。
+    // 登入成功 → BFS 起點改為登入後的 landing URL；登入失敗 → 仍從 TARGET 起跳，
+    // 由原本的 redirectedToLogin 判定揭露問題。
+    let startUrl = initialUrl;
+    let loginNote = '';
+    const loginRequired = (process.env.LOGIN_REQUIRED || '').toLowerCase() === 'true';
+    const hasCreds = !!(process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD);
+    if (loginRequired && hasCreds) {
+      const r = await loginIfPossible(page);
+      if (r.success) {
+        startUrl = page.url();
+        loginNote = `login ok → start at ${startUrl}`;
+        console.log(`  ✓ 登入成功，從登入後的 ${startUrl} 開始巡檢`);
+      } else {
+        loginNote = `login failed: ${r.reason}`;
+        console.log(`  ✗ 登入未成功（${r.reason}）— 退化從 ${initialUrl} 匿名巡檢`);
+      }
+    } else if (loginRequired && !hasCreds) {
+      loginNote = 'LOGIN_REQUIRED=true 但無帳密';
+    }
 
     const startObj = new URL(startUrl);
     const startOrigin = startObj.origin;
@@ -99,9 +130,6 @@ test.describe('全頁巡檢', () => {
     ];
     const visited = new Set<string>();
     const results: PageResult[] = [];
-
-    const ctx = await browser.newContext();
-    const page = await ctx.newPage();
 
     while (queue.length && results.length < MAX_PAGES) {
       const job = queue.shift()!;
@@ -191,6 +219,8 @@ test.describe('全頁巡檢', () => {
     // ─── 寫報告 ─────────────────────────────────
     const summary = {
       target: startUrl,
+      initial_target: initialUrl,
+      login_note: loginNote,
       started_at_login: startedAtLogin,
       visited: results.length,
       ok: results.filter(r => r.ok && !r.redirectedToLogin).length,

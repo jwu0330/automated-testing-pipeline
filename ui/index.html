@@ -66,14 +66,6 @@
           <span>OpenAPI 檔（選填，僅 API 測試用 — yaml / yml / json）</span>
           <input type="file" name="openapi" accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml">
         </label>
-
-        <!--
-          Session 區塊已於 2026-04-30 廢棄：目標站多數已關後端 auth，
-          pipeline 預設**不**走登入流程。底下保留隱藏欄位讓 server.js 的
-          表單解析不出錯；要恢復 session 模式請另開 dev 流程，
-          參考 tests/scripts/lib/session-capture.js 與 ui/lib/prelogin-browser.js。
-        -->
-        <input type="hidden" name="storage_state_text" id="storage_state_text" value="">
       </div>
     </div>
 
