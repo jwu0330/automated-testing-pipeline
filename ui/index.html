@@ -22,67 +22,66 @@
   <p class="lead">填好下方表單，送出後系統會對目標 URL 執行所選測試項目。每次只允許一個任務同時執行。</p>
 
   <form id="run-form">
-    <label>
-      <span>目標 URL <em>必填</em></span>
-      <input type="url" name="target_url" placeholder="https://example.com" required>
-    </label>
+    <div class="form-grid">
+      <div class="col">
+        <label>
+          <span>目標 URL <em>必填</em></span>
+          <input type="url" name="target_url" placeholder="https://example.com" required>
+        </label>
 
-    <fieldset>
-      <legend>測試人員帳號（選填，最多 2 組；提供給 API / Auth 測試使用）</legend>
-      <div class="tester-row">
-        <input type="text" name="tester1_user" placeholder="帳號" value="admin001" autocomplete="off">
-        <input type="text" name="tester1_pass" placeholder="密碼" value="@admin001" autocomplete="off">
-      </div>
-      <div class="tester-row">
-        <input type="text" name="tester2_user" placeholder="帳號（選填）" autocomplete="off">
-        <input type="text" name="tester2_pass" placeholder="密碼（選填）" autocomplete="off">
-      </div>
-    </fieldset>
+        <fieldset>
+          <legend>測試人員帳號（選填，最多 2 組；提供給 API / Auth 測試使用）</legend>
+          <div class="tester-row">
+            <input type="text" name="tester1_user" placeholder="帳號" value="admin001" autocomplete="off">
+            <input type="text" name="tester1_pass" placeholder="密碼" value="@admin001" autocomplete="off">
+          </div>
+          <div class="tester-row">
+            <input type="text" name="tester2_user" placeholder="帳號（選填）" autocomplete="off">
+            <input type="text" name="tester2_pass" placeholder="密碼（選填）" autocomplete="off">
+          </div>
+        </fieldset>
 
-    <fieldset>
-      <legend>要跑的測試項目</legend>
-      <label class="check"><input type="checkbox" name="scope" value="ssl" checked> SSL / TLS 掃描 (testssl.sh)</label>
-      <label class="check"><input type="checkbox" name="scope" value="security" checked> 漏洞掃描 (OWASP ZAP)</label>
-      <label class="check"><input type="checkbox" name="scope" value="nuclei" checked> 漏洞模板掃描 (Nuclei)</label>
-      <label class="check"><input type="checkbox" name="scope" value="lighthouse" checked> 效能 / 無障礙 (Lighthouse)</label>
-      <label class="check"><input type="checkbox" name="scope" value="links"> 死連結檢查 (Lychee)</label>
-      <label class="check"><input type="checkbox" name="scope" value="stress"> 負載測試 (k6)</label>
-      <label class="check"><input type="checkbox" name="scope" value="e2e"> 端對端測試 (Playwright，自動登入 + 內頁巡檢)</label>
-      <label class="check"><input type="checkbox" name="scope" value="monkey"> Monkey 隨機點擊 (Gremlins)</label>
-      <label class="check"><input type="checkbox" name="scope" value="api-test"> API 測試（需上傳 OpenAPI）</label>
-    </fieldset>
+        <label>
+          <span>Email（選填 — 填了會把報告摘要寄到您信箱）</span>
+          <input type="email" name="email" placeholder="you@example.com">
+        </label>
 
-    <label>
-      <span>OpenAPI 檔（選填，僅 API 測試用 — yaml / yml / json）</span>
-      <input type="file" name="openapi" accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml">
-    </label>
-
-    <fieldset>
-      <legend>Session（選填，<u>避開驗證碼 / 2FA</u>）</legend>
-
-      <div class="prelogin">
-        <strong>路徑 A：🪟 跳出視窗手動登入（推薦，能處理 CAPTCHA / 2FA / SSO）</strong>
-        <p class="hint">
-          按下按鈕會用上方目標 URL 跳出一個 <u>Playwright 控制的瀏覽器視窗</u>。在裡面手動登入（解 CAPTCHA、輸 OTP 都行），登入完成後關閉該視窗，session 會自動擷取並填到下方 Session 框。
-        </p>
-        <button type="button" id="prelogin-browser-btn">🪟 開啟瀏覽器登入</button>
-        <p id="prelogin-browser-status" class="status"></p>
+        <label>
+          <span>OpenAPI 檔（選填，僅 API 測試用 — yaml / yml / json）</span>
+          <input type="file" name="openapi" accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml">
+        </label>
       </div>
 
-      <label>
-        <span>路徑 B：手動貼上（備援）</span>
-        <textarea name="storage_state_text" id="storage_state_text" rows="3" placeholder='{"cookies":[...],"origins":[...]} 或 [{"name":"PHPSESSID","value":"...","domain":"..."},...]'></textarea>
-        <small class="hint">
-          路徑 A 失敗時：安裝 <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" rel="noopener">Cookie-Editor</a> →
-          自己瀏覽器手動登入目標站 → 點擴充功能 → Export → 在這 Ctrl+V。
-        </small>
-      </label>
-    </fieldset>
+      <div class="col">
+        <fieldset>
+          <legend>要跑的測試項目</legend>
+          <label class="check"><input type="checkbox" name="scope" value="ssl" checked> SSL / TLS 掃描 (testssl.sh)</label>
+          <label class="check"><input type="checkbox" name="scope" value="security" checked> 漏洞掃描 (OWASP ZAP)</label>
+          <label class="check"><input type="checkbox" name="scope" value="nuclei" checked> 漏洞模板掃描 (Nuclei)</label>
+          <label class="check"><input type="checkbox" name="scope" value="lighthouse" checked> 效能 / 無障礙 (Lighthouse)</label>
+          <label class="check"><input type="checkbox" name="scope" value="links"> 死連結檢查 (Lychee)</label>
+          <label class="check"><input type="checkbox" name="scope" value="stress"> 負載測試 (k6)</label>
+          <label class="check"><input type="checkbox" name="scope" value="e2e"> 端對端測試 (Playwright，自動登入 + 內頁巡檢)</label>
+          <label class="check"><input type="checkbox" name="scope" value="monkey"> Monkey 隨機點擊 (Gremlins)</label>
+          <label class="check"><input type="checkbox" name="scope" value="api-test"> API 測試（需上傳 OpenAPI）</label>
+        </fieldset>
 
-    <label>
-      <span>Email（選填 — 填了會把報告摘要寄到您信箱）</span>
-      <input type="email" name="email" placeholder="you@example.com">
-    </label>
+        <fieldset>
+          <legend>Session（選填，避開驗證碼 / 2FA）</legend>
+
+          <div class="prelogin">
+            <strong>路徑 A：跳出視窗手動登入</strong>
+            <button type="button" id="prelogin-browser-btn">🪟 開啟瀏覽器登入</button>
+            <p id="prelogin-browser-status" class="status"></p>
+          </div>
+
+          <label class="path-b">
+            <span>路徑 B：手動貼上（備援）</span>
+            <textarea name="storage_state_text" id="storage_state_text" rows="8" placeholder='貼上 Cookie-Editor → Export 的 JSON 陣列，或 Playwright storageState 物件 {"cookies":[...],"origins":[...]}'></textarea>
+          </label>
+        </fieldset>
+      </div>
+    </div>
 
     <button type="submit" id="submit-btn">送出並開始測試</button>
     <p id="status" class="status"></p>

@@ -61,6 +61,17 @@ form, section {
   padding: 1.25rem 1.5rem;
   margin-top: 1.25rem;
 }
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+.form-grid .col { min-width: 0; }
+.form-grid .col > :last-child { margin-bottom: 0; }
+.form-grid fieldset { margin-bottom: 1rem; }
+@media (max-width: 800px) {
+  .form-grid { grid-template-columns: 1fr; }
+}
 label {
   display: block;
   margin-bottom: 1rem;
@@ -86,6 +97,20 @@ input[type="url"], input[type="file"] {
   font: inherit;
   background: #fff;
 }
+textarea {
+  display: block;
+  width: 100%;
+  padding: .55rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: .82rem;
+  background: #fff;
+  resize: vertical;
+}
+.hint { display: block; color: var(--muted); font-size: .85rem; margin: .35rem 0 0; }
+.prelogin { margin-bottom: 1rem; }
+.prelogin strong { display: block; margin-bottom: .5rem; }
 fieldset {
   border: 1px solid var(--border);
   border-radius: 6px;
