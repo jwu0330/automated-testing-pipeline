@@ -191,13 +191,25 @@ function passwordZip(sourceFile, zipPath, password) {
   });
 }
 
+// 結束碼對應的人話 — 給信件 / UI 共用
+function explainExitCode(code) {
+  if (code === 0)   return '全部測試流程跑完，未發生致命錯誤';
+  if (code === -1)  return '使用者按下取消';
+  if (code === 1)   return '流程中有指令失敗（常見：設定欄位缺漏、yq 解析錯）';
+  if (code === 2)   return '流程中有指令失敗，或 ZAP 偵測到 WARN 等級警告';
+  if (code === 127) return '啟動失敗：找不到 bash / wsl / 子腳本路徑';
+  if (code === 130) return '被 Ctrl+C 中斷';
+  if (code === 137) return '被強制終止（SIGKILL — 容器被 stop / 系統 OOM）';
+  return '子腳本回傳非預期結束碼，請看附件 run.log 末段定位';
+}
+
 async function sendReportEmail({ to, reportDir, targetUrl, scope, exitCode, jobId, archivePath }) {
   if (!to) return { ok: false, skipped: true, reason: 'no recipient' };
 
   // 組 body：開頭 + report.md（截斷 50KB）
   const headerLines = [
     jobId ? `任務：${jobId}` : null,
-    typeof exitCode === 'number' ? `結束碼：${exitCode}` : null,
+    typeof exitCode === 'number' ? `結束碼：${exitCode}（${explainExitCode(exitCode)}）` : null,
     targetUrl ? `目標：${targetUrl}` : null,
     scope ? `Scope：${scope}` : null,
   ].filter(Boolean);
