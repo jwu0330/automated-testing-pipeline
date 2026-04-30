@@ -40,14 +40,17 @@ Helper rule:
 
 Ask the user. Single prompt, list everything you need:
 
-| 必填 | 範例 |
-|------|------|
-| 網址 (target_url) | `https://xcity.example.com/` |
-| 專案名稱 (name) | `xcity` — 英數底線；會用作資料夾名 |
-| ADMIN_USERNAME | 留空跳過登入測試 |
-| ADMIN_PASSWORD | 留空跳過登入測試 |
+| 欄位 | 必填 | 範例 |
+|------|------|------|
+| 網址 (target_url) | ✅ | `https://xcity.example.com/` |
+| 專案名稱 (name) | ✅ | `xcity` — 英數底線；會用作資料夾名 |
+| ADMIN_USERNAME | 選填 | 留空跳過登入測試 |
+| ADMIN_PASSWORD | 選填 | 留空跳過登入測試 |
+| Email | 選填 | 填了會在跑完後把報告（含 `reports.tgz` 附件）寄到這個信箱 |
 
 If the user gave inputs in their original message, parse them directly — don't re-ask.
+
+> Email 走的是 `<pipeline>/.env` 裡的 `SMTP_URL/USER/PASS/FROM`（與 Web UI 共用同一份設定）。沒設定的話 CLI 會回 exit=2 並印 `email skipped: SMTP_URL/USER/PASS 未設定`，**不影響測試本身的成敗**。
 
 ## Step 2 — Locate the pipeline
 
@@ -140,6 +143,37 @@ REPORT_DIR="$PIPELINE_HOME/$NAME/.testing/reports"
 
 wsl.exe bash -c "test -f '$REPORT_DIR/report.md' && head -80 '$REPORT_DIR/report.md'"
 ```
+
+### Step 6.1 — Email report (only if user gave Email in Step 1)
+
+Same backend as the Web UI — both go through `tests/scripts/lib/mailer.js`. Just call the CLI wrapper:
+
+```bash
+# ENV=wsl / native:
+node "$PIPELINE_HOME/tests/scripts/send-report-email.js" \
+  --to "$EMAIL" \
+  --report-dir "$REPORT_DIR" \
+  --target "$TARGET_URL" \
+  --scope all \
+  --exit-code "$RUN_EXIT_CODE" \
+  --job-id "$NAME"
+
+# ENV=win-with-wsl:
+wsl.exe bash -c "node '$PIPELINE_HOME/tests/scripts/send-report-email.js' \
+  --to '$EMAIL' \
+  --report-dir '$REPORT_DIR' \
+  --target '$TARGET_URL' \
+  --scope all \
+  --exit-code '$RUN_EXIT_CODE' \
+  --job-id '$NAME'"
+```
+
+CLI exit codes:
+- `0` 寄送成功 → 在回覆裡告訴使用者 `📧 已寄至 <email>`
+- `2` 跳過（SMTP 未設定）→ 提示使用者去 `<pipeline>/.env` 補 `SMTP_URL/USER/PASS`，但**不要**重跑測試
+- `1` 失敗 → 把 stderr 裡的 `[mail] failed (curl=XX): ...` 原話貼給使用者，附常見錯誤對照（`67`=密碼錯，`28`=網路擋 port）
+
+`$EMAIL` 沒填就**整段跳過 Step 6.1**，不要呼叫 CLI。
 
 In your reply:
 

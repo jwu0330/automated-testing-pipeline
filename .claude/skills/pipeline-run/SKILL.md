@@ -87,6 +87,14 @@ bash "$PIPELINE_HOME/tests/scripts/register-project.sh" "$NAME" "$LOCAL_PATH"
 wsl.exe bash -c "bash '$PIPELINE_HOME/tests/scripts/register-project.sh' '$NAME' '$LOCAL_PATH'"
 ```
 
+## Step 3.5 — Ask about Email (optional)
+
+If the user didn't already say where to send the report, ask **once**:
+
+> 跑完要把報告寄到哪個 Email？（直接按 Enter 跳過）
+
+`$EMAIL` 留空就不寄；填了就在 Step 6 之後呼叫 `send-report-email.js`（與 Web UI 走同一份 backend，見 Step 7）。
+
 ## Step 4 — Decide scope
 
 Ask the user what to run **only if they didn't say**. Defaults:
@@ -159,6 +167,37 @@ End with:
 (`<REPORT_DIR>` is the path resolved above — typically `<your-project>/.testing/reports/`.)
 
 If `report.json` shows `overallScore < 80` or has parse errors, end with a single sentence stating what to fix first.
+
+## Step 7 — Email report (only if user gave Email in Step 3.5)
+
+跟 Web UI 走同一份 backend（`tests/scripts/lib/mailer.js`）；CLI 在這：
+
+```bash
+# ENV=wsl / native:
+node "$PIPELINE_HOME/tests/scripts/send-report-email.js" \
+  --to "$EMAIL" \
+  --report-dir "$REPORT_DIR" \
+  --target "$(yq -r .project.target_url .testing/testing.yml)" \
+  --scope "$SCOPE" \
+  --exit-code "$RUN_EXIT_CODE" \
+  --job-id "$NAME"
+
+# ENV=win-with-wsl:
+wsl.exe bash -c "node '$PIPELINE_HOME/tests/scripts/send-report-email.js' \
+  --to '$EMAIL' \
+  --report-dir '$REPORT_DIR' \
+  --target '$TARGET_URL' \
+  --scope '$SCOPE' \
+  --exit-code '$RUN_EXIT_CODE' \
+  --job-id '$NAME'"
+```
+
+CLI exit codes:
+- `0` 成功 → `📧 已寄至 <email>`
+- `2` SMTP 未設定（提示去 `<pipeline>/.env` 補 `SMTP_URL/USER/PASS`，**不要**重跑測試）
+- `1` 失敗（`67`=密碼錯，`28`=網路擋 port，`6`=DNS）
+
+`$EMAIL` 沒填就**整段跳過**，不要呼叫 CLI。
 
 ## Boundaries
 

@@ -16,7 +16,6 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
-const os = require('os');
 
 const ROOT = path.resolve(__dirname, '..');
 const UI_DIR = __dirname;
@@ -24,23 +23,9 @@ const RUNTIME = path.join(UI_DIR, '.runtime');
 const JOBS = path.join(RUNTIME, 'jobs');
 const LOCK = path.join(RUNTIME, 'lock');
 
-// 零依賴載入 .env（流水線根目錄）：KEY=VALUE，支援 # 註解、單/雙引號
-(() => {
-  const envFile = path.join(ROOT, '.env');
-  if (!fs.existsSync(envFile)) return;
-  const txt = fs.readFileSync(envFile, 'utf8');
-  for (const raw of txt.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-    if (!m) continue;
-    let v = m[2];
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-      v = v.slice(1, -1);
-    }
-    if (!(m[1] in process.env)) process.env[m[1]] = v;
-  }
-})();
+// 共用寄信模組（CLI 也用同一份；保證 UI / Skill 邏輯一致）
+const { loadDotenv, sendReportEmail } = require('../tests/scripts/lib/mailer');
+loadDotenv(ROOT);
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const IS_WIN = process.platform === 'win32';
@@ -61,6 +46,72 @@ const spawnBash = (scriptPath, args, options) => {
   if (IS_WIN) return spawn('wsl', ['-e', 'bash', sp, ...sa], options || {});
   return spawn('bash', [sp, ...sa], options || {});
 };
+
+// ─── Docker 健康檢查 + 自動喚醒 ─────────────────────────────
+// 在 Windows 上：透過 WSL 呼叫 docker info；失敗就啟動 Docker Desktop
+// 在 Linux/macOS：直接 docker info；失敗就回報（不自動啟動，避免誤操作）
+function dockerInfo() {
+  return new Promise((resolve) => {
+    const c = IS_WIN
+      ? spawn('wsl', ['-e', 'bash', '-lc', 'docker info >/dev/null 2>&1'])
+      : spawn('bash', ['-lc', 'docker info >/dev/null 2>&1']);
+    c.on('error', () => resolve(false));
+    c.on('close', (code) => resolve(code === 0));
+  });
+}
+function startDockerDesktopWindows() {
+  // 不阻塞、直接 detach；幾種常見路徑都試一次
+  const candidates = [
+    'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe',
+    'C:\\Program Files (x86)\\Docker\\Docker\\Docker Desktop.exe',
+  ];
+  for (const exe of candidates) {
+    if (fs.existsSync(exe)) {
+      try {
+        spawn(exe, [], { detached: true, stdio: 'ignore' }).unref();
+        return { ok: true, exe };
+      } catch {}
+    }
+  }
+  // 後備：透過 PowerShell 啟動（從 Start Menu 解析）
+  try {
+    spawn('powershell', ['-NoProfile', '-Command', 'Start-Process "Docker Desktop"'], { detached: true, stdio: 'ignore' }).unref();
+    return { ok: true, exe: 'Start-Process Docker Desktop' };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+async function ensureDockerReady(writeLog, timeoutMs = 180000) {
+  if (await dockerInfo()) {
+    writeLog('[ui] docker: ready ✓\n');
+    return true;
+  }
+  writeLog('[ui] docker: not ready, attempting auto-start…\n');
+  if (IS_WIN) {
+    const r = startDockerDesktopWindows();
+    if (!r.ok) {
+      writeLog(`[ui] docker: 啟動失敗（${r.error || '找不到 Docker Desktop'}）\n`);
+      return false;
+    }
+    writeLog(`[ui] docker: launched (${r.exe})，等待 daemon 就緒（最長 ${timeoutMs/1000}s）…\n`);
+  } else {
+    writeLog('[ui] docker: 非 Windows 環境，請手動啟動 docker daemon（systemctl start docker）\n');
+    return false;
+  }
+  const start = Date.now();
+  let waited = 0;
+  while (Date.now() - start < timeoutMs) {
+    await new Promise(r => setTimeout(r, 3000));
+    waited += 3;
+    if (await dockerInfo()) {
+      writeLog(`[ui] docker: ready after ${waited}s ✓\n`);
+      return true;
+    }
+    if (waited % 15 === 0) writeLog(`[ui] docker: still waiting… (${waited}s)\n`);
+  }
+  writeLog(`[ui] docker: timeout after ${timeoutMs/1000}s\n`);
+  return false;
+}
 
 // 純靜態檔表
 const STATIC = {
@@ -147,51 +198,6 @@ async function parseMultipart(req) {
   });
 }
 
-// ─── 寄信（curl + SMTP；無 SMTP_URL 則跳過）─────────────
-function sendEmail({ to, subject, body }) {
-  const smtpUrl = process.env.SMTP_URL;     // 例：smtps://smtp.gmail.com:465
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const from = process.env.SMTP_FROM || smtpUser;
-  if (!smtpUrl || !smtpUser || !smtpPass || !from) {
-    return Promise.resolve({ ok: false, skipped: true, reason: 'SMTP_URL/USER/PASS 未設定' });
-  }
-  const date = new Date().toUTCString();
-  const msgId = `<${crypto.randomBytes(8).toString('hex')}@atp.local>`;
-  const subjB64 = '=?UTF-8?B?' + Buffer.from(subject, 'utf8').toString('base64') + '?=';
-  const msg = [
-    `From: ${from}`,
-    `To: ${to}`,
-    `Subject: ${subjB64}`,
-    `Date: ${date}`,
-    `Message-ID: ${msgId}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: text/plain; charset=utf-8`,
-    `Content-Transfer-Encoding: 8bit`,
-    ``,
-    body,
-  ].join('\r\n');
-  const tmp = path.join(os.tmpdir(), `atp-mail-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.eml`);
-  fs.writeFileSync(tmp, msg, 'utf8');
-  return new Promise((resolve) => {
-    const c = spawn('curl', [
-      '--silent', '--show-error', '--ssl-reqd',
-      '--url', smtpUrl,
-      '--mail-from', from,
-      '--mail-rcpt', to,
-      '--user', `${smtpUser}:${smtpPass}`,
-      '--upload-file', tmp,
-    ]);
-    let err = '';
-    c.stderr.on('data', d => err += d.toString());
-    c.on('error', (e) => { try { fs.unlinkSync(tmp); } catch {} resolve({ ok: false, error: e.message }); });
-    c.on('close', (code) => {
-      try { fs.unlinkSync(tmp); } catch {}
-      resolve({ ok: code === 0, code, error: err.trim() });
-    });
-  });
-}
-
 // 寫 .env 用：以單引號包起 + 內部單引號跳脫（避免 source 時被當 shell 指令）
 const envQuote = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
 
@@ -271,7 +277,8 @@ tests: {}
     clearLock();
   };
 
-  // ① register-project.sh
+  // ① 先確保 Docker 就緒，再 register
+  const proceed = () => {
   const reg = spawnBash(path.join(ROOT, 'tests', 'scripts', 'register-project.sh'), [projectName, projectPathBash], {
     cwd: ROOT, env: process.env,
   });
@@ -303,27 +310,19 @@ tests: {}
         ? spawn('tar', ['-czf', archive, '-C', path.dirname(targetReports), 'reports'], { stdio: 'ignore' })
         : { on: (ev, cb) => { if (ev === 'close') setImmediate(() => cb(1)); } };
       const afterArchive = (archiveOk) => {
-        // ④ 寄信（若有填 email）
+        // ④ 寄信（若有填 email）— 走共用模組，跟 Skill CLI 同一份
         if (!email) {
           finish(rcode, archiveOk ? 'reports.tgz' : null);
           return;
         }
-        const reportMd = path.join(targetReports, 'report.md');
-        let bodySummary = `測試任務 ${jobId} 已完成。\n結束碼：${rcode}\n目標：${targetUrl}\nScope：${scopeArg}\n\n`;
-        try {
-          if (fs.existsSync(reportMd)) {
-            const md = fs.readFileSync(reportMd, 'utf8');
-            bodySummary += '─── report.md ───\n\n' + (md.length > 50000 ? md.slice(0, 50000) + '\n\n[…內容過長已截斷…]' : md);
-          } else {
-            bodySummary += '（找不到 report.md，請從網頁下載 reports.tgz 查看原始輸出。）';
-          }
-        } catch (e) {
-          bodySummary += `（讀取 report.md 失敗：${e.message}）`;
-        }
-        sendEmail({
+        sendReportEmail({
           to: email,
-          subject: `[ATP] 測試完成 - ${new URL(targetUrl).hostname} (exit=${rcode})`,
-          body: bodySummary,
+          reportDir: targetReports,
+          targetUrl,
+          scope: scopeArg,
+          exitCode: rcode,
+          jobId,
+          archivePath: archiveOk ? archive : undefined,
         }).then((r) => {
           if (r.skipped)      writeLog(`[ui] email skipped: ${r.reason}\n`);
           else if (r.ok)      writeLog(`[ui] email sent → ${email}\n`);
@@ -334,6 +333,16 @@ tests: {}
       tar.on('error', () => afterArchive(false));
       tar.on('close', (tcode) => afterArchive(tcode === 0 && fs.existsSync(archive)));
     });
+  });
+  };
+  // 等 Docker 就緒再進入 register/run
+  ensureDockerReady(writeLog).then((ok) => {
+    if (!ok) {
+      writeLog('[ui] aborting: docker not available\n');
+      finish(126, null);
+      return;
+    }
+    proceed();
   });
 
   return jobId;
