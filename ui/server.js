@@ -28,6 +28,9 @@ const LOCK = path.join(RUNTIME, 'lock');
 const { loadDotenv, sendReportEmail } = require('../tests/scripts/lib/mailer');
 loadDotenv(ROOT);
 
+// 共用 session 擷取模組（CLI 也用同一份）
+const { captureSession } = require('../tests/scripts/lib/session-capture');
+
 // 預先登入：純 Node HTTP，幫使用者擷取 session（避免他們手動 Cookie-Editor）
 const { httpLogin } = require('./lib/http-login');
 
@@ -476,89 +479,35 @@ const server = http.createServer(async (req, res) => {
   // POST /api/prelogin-browser — 跳出 Playwright 控制的瀏覽器視窗，由使用者手動登入
   // 使用者關閉視窗時 Playwright 會把 storageState 存到指定檔，後端讀回來回傳 UI
   // 這條路徑能處理 CAPTCHA / 2FA / SSO，因為實際登入動作是真人在做
+  // 共用 backend：tests/scripts/lib/session-capture.js（CLI 走同一份）
   if (req.method === 'POST' && pathname === '/api/prelogin-browser') {
     let body = '';
     req.on('data', c => body += c);
-    req.on('end', () => {
+    req.on('end', async () => {
       let payload;
       try { payload = JSON.parse(body || '{}'); }
       catch { sendJSON(res, 400, { error: 'JSON 解析失敗' }); return; }
       const loginUrl = String(payload.loginUrl || '').trim();
-      if (!/^https?:\/\//i.test(loginUrl)) {
-        sendJSON(res, 400, { ok: false, reason: '需提供合法 http(s) URL' }); return;
-      }
 
       const tmpFile = path.join(os.tmpdir(), `atp-storage-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.json`);
-      let stderr = '';
-      let timedOut = false;
-
-      // Node 20+ 在 Windows 直接 spawn .cmd/.bat 會 EINVAL；必須走 shell。
-      // 引號 loginUrl 避免 shell 把 query string 的 & 當作分隔符切斷
-      const args = ['playwright', 'open', `--save-storage="${tmpFile}"`, `"${loginUrl}"`];
-      const cmdline = `npx ${args.join(' ')}`;
-      const child = spawn(cmdline, [], {
-        cwd: UI_DIR,
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true,
+      const r = await captureSession({
+        loginUrl,
+        outputPath: tmpFile,
+        uiCwd: UI_DIR,
       });
-      child.stderr.on('data', d => { stderr += d.toString(); });
-      child.stdout.on('data', d => { stderr += d.toString(); }); // 一起接 — Playwright 訊息常走 stdout
+      // UI 流程：把 storageState 直接回給前端（前端會 JSON.stringify 進 textarea），
+      // 暫存檔不再保留
+      try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch {}
 
-      // 5 分鐘上限：使用者忘了關視窗也不會卡死
-      const killer = setTimeout(() => {
-        timedOut = true;
-        try { child.kill('SIGTERM'); } catch {}
-      }, 5 * 60 * 1000);
-
-      child.on('error', (e) => {
-        clearTimeout(killer);
-        sendJSON(res, 500, {
-          ok: false,
-          reason: `無法啟動 Playwright：${e.message}`,
-          hint: '請在 ui/ 目錄執行：npm install && npx playwright install chromium',
-        });
-      });
-
-      child.on('close', (code) => {
-        clearTimeout(killer);
-        if (timedOut) {
-          sendJSON(res, 504, { ok: false, reason: '超過 5 分鐘未關閉視窗，已強制終止' });
-          return;
-        }
-        if (!fs.existsSync(tmpFile)) {
-          sendJSON(res, 500, {
-            ok: false,
-            reason: `視窗結束但無 session 檔（exit=${code}）`,
-            stderr: stderr.slice(-500),
-            hint: 'Playwright 可能未安裝或 chromium 缺失：在 ui/ 執行 npm install && npx playwright install chromium',
-          });
-          return;
-        }
-        let ss;
-        try {
-          ss = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
-          fs.unlinkSync(tmpFile);
-        } catch (e) {
-          sendJSON(res, 500, { ok: false, reason: '讀取 session 檔失敗：' + e.message });
-          return;
-        }
-        const cookieCount = Array.isArray(ss.cookies) ? ss.cookies.length : 0;
-        const originCount = Array.isArray(ss.origins) ? ss.origins.length : 0;
-        if (cookieCount === 0 && originCount === 0) {
-          sendJSON(res, 200, {
-            ok: false,
-            reason: '視窗關閉時沒擷取到任何 cookie / storage — 可能視窗開了但沒實際登入',
-            storageState: ss,
-          });
-          return;
-        }
-        sendJSON(res, 200, {
-          ok: true,
-          reason: `擷取到 ${cookieCount} 個 cookie + ${originCount} 個 origin storage`,
-          storageState: ss,
-        });
-      });
+      if (r.ok) {
+        sendJSON(res, 200, { ok: true, reason: r.reason, storageState: r.storageState });
+        return;
+      }
+      // 區分錯誤類別給對應 HTTP code（保留原行為：URL 錯 400 / 逾時 504 / 其他 500 / 沒擷到 200）
+      if (/合法 http\(s\)/.test(r.reason || ''))            { sendJSON(res, 400, r); return; }
+      if (/超過.+未關閉/.test(r.reason || ''))              { sendJSON(res, 504, r); return; }
+      if (r.storageState)                                    { sendJSON(res, 200, r); return; }
+      sendJSON(res, 500, r);
     });
     return;
   }

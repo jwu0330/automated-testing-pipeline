@@ -110,6 +110,39 @@ EOF"
 
 If user left credentials blank, write the file but with empty values (api-test will surface a warning).
 
+## Step 3.5 — Capture login session via real browser (only if needed)
+
+**When this applies**: target site has CAPTCHA / 2FA / SSO / 前端密碼加密，純表單登入會失敗。If user只給 ADMIN_USERNAME/PASSWORD 而站台沒這些保護，跳過本步——`run_e2e` 會自己用表單登入。
+
+**Trigger**: 使用者主動說「需要手動登入」/「有 CAPTCHA」/「2FA」/「SSO」/「Google 登入」/「session key 要自己抓」，或你看到登入測試在前一輪 fail 了。
+
+**為什麼有獨立步驟**：UI 路徑（`/api/prelogin-browser`）跟這個 CLI 走 **同一份共用模組** `tests/scripts/lib/session-capture.js`，行為一致；run-project.sh 自動偵測 `<project>/.testing/storage-state.json`，有 session 檔就跳過表單登入。
+
+```bash
+# ⚠️ 這支 CLI 必須能顯示桌面 GUI——不能走 wsl.exe（WSL 無 WSLg 時會卡死）。
+# Claude Code 應該已經跑在 Windows-native shell（git bash / cmd / pwsh），
+# 直接呼叫 node 即可（path 用 Git Bash 風格 /e/... 或 Windows 風格 E:\...）。
+
+node "$PIPELINE_HOME/tests/scripts/capture-session.js" \
+  --url "$TARGET_URL" \
+  --output "$PIPELINE_HOME/$NAME/.testing/storage-state.json" \
+  --timeout-min 5
+```
+
+行為：
+- 跳出 Playwright 控制的瀏覽器視窗
+- 使用者手動登入（解 CAPTCHA / 輸 OTP / 走 SSO 都可以）
+- 登入完成後**手動關閉視窗**
+- session（cookies + localStorage）寫到 `--output`，e2e/monkey 自動接手
+
+Exit codes:
+- `0` 成功 → 繼續 Step 4
+- `2` 超過 5 分鐘逾時 → 問使用者要不要重試
+- `4` 視窗關了但沒擷到 cookie（沒實際登入） → 提示使用者重新跑這步並真的登入
+- `1` Playwright 沒裝 → 在 `<pipeline>/ui` 跑 `npm install && npx playwright install chromium`，然後重試
+
+**不要強制每次都跑這步**——只在使用者明確需要時才執行。多數狀況下 ADMIN_USERNAME/PASSWORD 表單登入就夠了。
+
 ## Step 4 — Locally gitignore the folder
 
 The folder must **not** end up in version control. Add it to `.git/info/exclude` (per-clone, not committed) — **do NOT** modify the committed `.gitignore`:

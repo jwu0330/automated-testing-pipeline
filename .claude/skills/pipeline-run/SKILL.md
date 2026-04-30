@@ -112,6 +112,40 @@ Show the user what you're about to run **before** running it, especially for des
 
 Valid scope tokens: `precheck`, `ssl`, `security`, `stress`, `static`, `e2e`, `api-test`, `auth-test`, `visual-test`, `browser-compat`, `nuclei`, `lighthouse`, `monkey`, `trivy`, `links`, `summary`. Presets: `all`, `remote-only`, `local-only`. Comma-separate multiples.
 
+## Step 4.5 — Capture login session via real browser (only if needed)
+
+**Skip this step entirely** unless 兩個條件**都**符合：
+
+1. Scope 包含 `e2e`、`monkey`、或 `all`（其他 scope 不需要登入態）
+2. 目標站需要 CAPTCHA / 2FA / SSO / 前端加密密碼，**或**使用者明確說「session 要自己抓」
+
+如果只是普通帳號密碼登入，run-project.sh 已經會用 `.testing/.env` 裡的 `ADMIN_USERNAME/PASSWORD` 走表單登入——直接跳到 Step 5。
+
+**為什麼是獨立步驟**：UI 路徑跟這個 CLI 走同一份模組（`tests/scripts/lib/session-capture.js`）；run-project.sh 自動偵測 `<project>/.testing/storage-state.json`，有檔就跳過表單登入。
+
+```bash
+# ⚠️ 必須在能顯示桌面 GUI 的 shell 跑——不要透過 wsl.exe（WSL 無 WSLg 會卡死）。
+# Claude Code 從 Windows git bash 啟動就直接 node 即可。
+# 從純 WSL 啟動的話，請先在 Windows 端開個 shell 跑這支，再回來繼續。
+
+LOCAL_PATH=$(yq -r '.project.local_path // ""' .testing/testing.yml)
+[ -z "$LOCAL_PATH" ] && LOCAL_PATH=$(pwd)
+
+node "$PIPELINE_HOME/tests/scripts/capture-session.js" \
+  --url "$(yq -r .project.target_url .testing/testing.yml)" \
+  --output "$LOCAL_PATH/.testing/storage-state.json" \
+  --timeout-min 5
+```
+
+> **路徑注意**：`--output` 給原生路徑（Git Bash `/e/...` 或 Windows `E:\...`）。如果 `LOCAL_PATH` 是 `/mnt/e/...`（WSL 形式），先換成 `/e/...` 再傳。
+
+Exit codes:
+- `0` → 進入 Step 5
+- `2` 逾時 / `4` 沒登入 → 問使用者要不要重試這步
+- `1` Playwright 沒裝 → `cd $PIPELINE_HOME/ui && npm install && npx playwright install chromium`
+
+**重要**：把 `.testing/storage-state.json` 加到 user 的 `.gitignore`（`echo '.testing/storage-state.json' >> .gitignore`），它含登入 cookie，**絕不能** commit。如果 `.testing/` 整包已經 ignore 就免做。
+
 ## Step 5 — Run
 
 Always invoke through the env helper (Docker is in WSL):

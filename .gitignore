@@ -27,6 +27,10 @@ tests/e2e/playwright/.cache/
 tests/monkey/node_modules/
 tests/monkey/test-results/
 
+# 擷取到的登入 session（含 cookies）— 任何位置都不能 commit
+storage-state.json
+**/storage-state.json
+
 # UI server 的 host 端 Playwright 安裝（供路徑 A 跳視窗登入用）
 ui/node_modules/
 ui/.runtime/
